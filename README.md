@@ -20,7 +20,7 @@
 ## 快速开始
 
 ```bash
-docker compose up --build
+docker compose up -d
 ```
 
 启动后打开：
@@ -38,7 +38,7 @@ http://localhost:8080
 如果不设置 Token，服务端会在启动时自动生成一个 128 字符随机 Token，并输出到日志中。你也可以手动设置固定 Token：
 
 ```bash
-GUIDENG_TOKEN=replace-with-a-long-random-token docker compose up --build
+GUIDENG_TOKEN=replace-with-a-long-random-token docker compose up -d
 ```
 
 ## 开发运行
@@ -118,7 +118,15 @@ X-Guideng-Token: <token>
 使用 Docker Compose：
 
 ```bash
-GUIDENG_TOKEN=replace-with-a-long-random-token docker compose up -d --build
+GUIDENG_TOKEN=replace-with-a-long-random-token docker compose up -d
+```
+
+默认会拉取 `facilisvelox/guideng-server:latest` 和 `facilisvelox/guideng-client:latest`。如需使用自定义镜像：
+
+```bash
+GUIDENG_SERVER_IMAGE=yourname/guideng-server:v0.1.0 \
+GUIDENG_CLIENT_IMAGE=yourname/guideng-client:v0.1.0 \
+docker compose up -d
 ```
 
 项目也包含 `zeabur.yaml`，可以作为 Zeabur 部署模板使用。部署时可以手动设置 `GUIDENG_TOKEN`；如果留空，服务端会自动生成并写入日志。
@@ -128,7 +136,7 @@ GUIDENG_TOKEN=replace-with-a-long-random-token docker compose up -d --build
 项目根目录提供了 `nginx.conf`，用于本地先通过 Docker Compose 启动服务端，再用宿主机 Nginx 反代服务端端口。
 
 ```bash
-docker compose up -d --build
+docker compose up -d
 sudo cp nginx.conf /etc/nginx/nginx.conf
 sudo nginx -t
 sudo systemctl reload nginx

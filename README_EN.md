@@ -16,7 +16,7 @@ Guideng is a self-hosted family location sharing app. It has a Rust server in `s
 ## Quick Start
 
 ```bash
-docker compose up --build
+docker compose up -d
 ```
 
 Then open `http://localhost:3000`.
@@ -26,7 +26,7 @@ Default server URL in local Docker is `http://localhost:8080`.
 If no token is provided, the server generates a 128-character random token on startup and writes it to the log. You can also set a fixed token manually:
 
 ```bash
-GUIDENG_TOKEN=replace-with-a-long-random-token docker compose up --build
+GUIDENG_TOKEN=replace-with-a-long-random-token docker compose up -d
 ```
 
 ## Development
@@ -95,7 +95,7 @@ For detailed local deployment, see [Local Deployment Guide](DEPLOY_LOCAL_EN.md) 
 The root `nginx.conf` is intended for running Docker Compose locally first, then using host Nginx to reverse proxy the server port.
 
 ```bash
-docker compose up -d --build
+docker compose up -d
 sudo cp nginx.conf /etc/nginx/nginx.conf
 sudo nginx -t
 sudo systemctl reload nginx

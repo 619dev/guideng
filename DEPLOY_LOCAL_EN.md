@@ -56,10 +56,8 @@ Remove a section similar to this:
 
 ```yaml
   client:
-    build:
-      context: ./client
-      args:
-        VITE_DEFAULT_SERVER_URL: ${VITE_DEFAULT_SERVER_URL:-http://localhost:8080}
+    image: facilisvelox/guideng-client:latest
+    pull_policy: always
     ports:
       - "3000:80"
     depends_on:
@@ -71,8 +69,8 @@ After removal, `docker-compose.yml` should look similar to this:
 ```yaml
 services:
   server:
-    build:
-      context: ./server
+    image: facilisvelox/guideng-server:latest
+    pull_policy: always
     environment:
       GUIDENG_TOKEN: ${GUIDENG_TOKEN:-}
       GUIDENG_BIND: 0.0.0.0:8080
@@ -109,7 +107,7 @@ You can also enter the container and inspect `/data/guideng.log`.
 ## 5. Start the Backend
 
 ```bash
-docker compose up -d --build
+docker compose up -d
 ```
 
 Check container status:
@@ -281,10 +279,11 @@ Restart the backend:
 docker compose restart server
 ```
 
-Rebuild and update:
+Pull and update:
 
 ```bash
-docker compose up -d --build
+docker compose pull server
+docker compose up -d
 ```
 
 Back up data:

@@ -2,8 +2,8 @@ name: guideng
 services:
   server:
     source:
-      type: dockerfile
-      path: ./server
+      type: image
+      image: facilisvelox/guideng-server:latest
     ports:
       - id: http
         port: 8080
@@ -20,12 +20,9 @@ services:
         dir: /data
   client:
     source:
-      type: dockerfile
-      path: ./client
+      type: image
+      image: facilisvelox/guideng-client:latest
     ports:
       - id: http
         port: 80
         type: HTTP
-    env:
-      VITE_DEFAULT_SERVER_URL:
-        default: ""

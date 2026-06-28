@@ -56,10 +56,8 @@ cd /opt/guideng
 
 ```yaml
   client:
-    build:
-      context: ./client
-      args:
-        VITE_DEFAULT_SERVER_URL: ${VITE_DEFAULT_SERVER_URL:-http://localhost:8080}
+    image: facilisvelox/guideng-client:latest
+    pull_policy: always
     ports:
       - "3000:80"
     depends_on:
@@ -71,8 +69,8 @@ cd /opt/guideng
 ```yaml
 services:
   server:
-    build:
-      context: ./server
+    image: facilisvelox/guideng-server:latest
+    pull_policy: always
     environment:
       GUIDENG_TOKEN: ${GUIDENG_TOKEN:-}
       GUIDENG_BIND: 0.0.0.0:8080
@@ -109,7 +107,7 @@ docker compose logs server
 ## 5. 启动服务端
 
 ```bash
-docker compose up -d --build
+docker compose up -d
 ```
 
 检查容器状态：
@@ -281,10 +279,11 @@ docker compose logs -f server
 docker compose restart server
 ```
 
-更新镜像并重建：
+更新镜像：
 
 ```bash
-docker compose up -d --build
+docker compose pull server
+docker compose up -d
 ```
 
 备份数据：
