@@ -475,8 +475,7 @@ async function sendLocation(session: Session, position: GeolocationPosition) {
 }
 
 function mapLink(provider: MapProvider, location: Location, name: string) {
-  const lat = location.latitude;
-  const lng = location.longitude;
+  const { latitude: lat, longitude: lng } = mapCoordinate(provider, location);
   const label = encodeURIComponent(name);
   if (provider === 'baidu') return `https://api.map.baidu.com/marker?location=${lat},${lng}&title=${label}&content=${label}&output=html`;
   if (provider === 'amap') return `https://uri.amap.com/marker?position=${lng},${lat}&name=${label}`;
@@ -487,7 +486,7 @@ function mapLink(provider: MapProvider, location: Location, name: string) {
 function trackLink(provider: MapProvider, locations: Location[], name: string) {
   if (locations.length < 2) return '';
   const label = encodeURIComponent(name);
-  const points = locations.slice(-50);
+  const points = locations.slice(-50).map((location) => mapCoordinate(provider, location));
   const last = points[points.length - 1];
 
   if (provider === 'amap') {
@@ -506,6 +505,64 @@ function trackLink(provider: MapProvider, locations: Location[], name: string) {
 
   const path = points.map((point) => `${point.latitude},${point.longitude}`).join('/');
   return `https://www.google.com/maps/dir/${path}`;
+}
+
+function mapCoordinate(provider: MapProvider, location: Location) {
+  const wgs84 = { latitude: location.latitude, longitude: location.longitude };
+  if (provider === 'baidu') return gcj02ToBd09(wgs84ToGcj02(wgs84));
+  if (provider === 'amap' || provider === 'apple') return wgs84ToGcj02(wgs84);
+  return wgs84;
+}
+
+function wgs84ToGcj02(point: { latitude: number; longitude: number }) {
+  if (isOutsideChina(point.latitude, point.longitude)) return point;
+
+  const a = 6378245.0;
+  const ee = 0.00669342162296594323;
+  let dLat = transformLat(point.longitude - 105.0, point.latitude - 35.0);
+  let dLng = transformLng(point.longitude - 105.0, point.latitude - 35.0);
+  const radLat = (point.latitude / 180.0) * Math.PI;
+  let magic = Math.sin(radLat);
+  magic = 1 - ee * magic * magic;
+  const sqrtMagic = Math.sqrt(magic);
+  dLat = (dLat * 180.0) / (((a * (1 - ee)) / (magic * sqrtMagic)) * Math.PI);
+  dLng = (dLng * 180.0) / ((a / sqrtMagic) * Math.cos(radLat) * Math.PI);
+
+  return {
+    latitude: point.latitude + dLat,
+    longitude: point.longitude + dLng,
+  };
+}
+
+function gcj02ToBd09(point: { latitude: number; longitude: number }) {
+  const x = point.longitude;
+  const y = point.latitude;
+  const z = Math.sqrt(x * x + y * y) + 0.00002 * Math.sin(y * Math.PI * 3000.0 / 180.0);
+  const theta = Math.atan2(y, x) + 0.000003 * Math.cos(x * Math.PI * 3000.0 / 180.0);
+  return {
+    latitude: z * Math.sin(theta) + 0.006,
+    longitude: z * Math.cos(theta) + 0.0065,
+  };
+}
+
+function isOutsideChina(latitude: number, longitude: number) {
+  return longitude < 72.004 || longitude > 137.8347 || latitude < 0.8293 || latitude > 55.8271;
+}
+
+function transformLat(x: number, y: number) {
+  let ret = -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * Math.sqrt(Math.abs(x));
+  ret += ((20.0 * Math.sin(6.0 * x * Math.PI) + 20.0 * Math.sin(2.0 * x * Math.PI)) * 2.0) / 3.0;
+  ret += ((20.0 * Math.sin(y * Math.PI) + 40.0 * Math.sin((y / 3.0) * Math.PI)) * 2.0) / 3.0;
+  ret += ((160.0 * Math.sin((y / 12.0) * Math.PI) + 320 * Math.sin((y * Math.PI) / 30.0)) * 2.0) / 3.0;
+  return ret;
+}
+
+function transformLng(x: number, y: number) {
+  let ret = 300.0 + x + 2.0 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * Math.sqrt(Math.abs(x));
+  ret += ((20.0 * Math.sin(6.0 * x * Math.PI) + 20.0 * Math.sin(2.0 * x * Math.PI)) * 2.0) / 3.0;
+  ret += ((20.0 * Math.sin(x * Math.PI) + 40.0 * Math.sin((x / 3.0) * Math.PI)) * 2.0) / 3.0;
+  ret += ((150.0 * Math.sin((x / 12.0) * Math.PI) + 300.0 * Math.sin((x / 30.0) * Math.PI)) * 2.0) / 3.0;
+  return ret;
 }
 
 function newestLocatedDevice(devices: Device[]) {

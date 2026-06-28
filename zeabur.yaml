@@ -1,28 +1,70 @@
-name: guideng
-services:
-  server:
-    source:
-      type: image
-      image: facilisvelox/guideng-server:latest
-    ports:
-      - id: http
-        port: 8080
-        type: HTTP
-    env:
-      GUIDENG_BIND: 0.0.0.0:8080
-      GUIDENG_DATABASE_URL: /data/guideng.sqlite3
-      GUIDENG_LOG_PATH: /data/guideng.log
-      GUIDENG_CORS_ORIGINS: "*"
-      GUIDENG_TOKEN:
-        default: ""
-    volumes:
-      - id: data
-        dir: /data
-  client:
-    source:
-      type: image
-      image: facilisvelox/guideng-client:latest
-    ports:
-      - id: http
-        port: 80
-        type: HTTP
+apiVersion: zeabur.com/v1
+kind: Template
+metadata:
+  name: Guideng
+spec:
+  description: Self-hosted family location sharing app with a Rust server and React client.
+  icon: https://raw.githubusercontent.com/619dev/guideng/main/client/public/assets/guideng-logo.png
+  tags:
+    - Tool
+    - Family
+    - Location
+  variables:
+    - key: GUIDENG_TOKEN
+      type: PASSWORD
+      name: Shared Token
+      description: Shared token for all Guideng clients. Leave empty to let the server generate one on startup.
+  readme: |-
+    # Guideng
+
+    Guideng is a self-hosted family location sharing app.
+
+    Deploys:
+
+    - `server`: Rust API server, SQLite storage, latest 7 days of tracks.
+    - `client`: React web client.
+
+    If `GUIDENG_TOKEN` is empty, the server generates a 128-character random token and writes it to `/data/guideng.log`.
+  services:
+    - name: server
+      icon: https://raw.githubusercontent.com/619dev/guideng/main/client/public/assets/guideng-logo.png
+      template: PREBUILT
+      spec:
+        source:
+          image: facilisvelox/guideng-server:latest
+        ports:
+          - id: http
+            port: 8080
+            type: HTTP
+        env:
+          GUIDENG_BIND:
+            default: 0.0.0.0:8080
+          GUIDENG_DATABASE_URL:
+            default: /data/guideng.sqlite3
+          GUIDENG_LOG_PATH:
+            default: /data/guideng.log
+          GUIDENG_CORS_ORIGINS:
+            default: "*"
+          GUIDENG_TOKEN:
+            default: ${GUIDENG_TOKEN}
+        volumes:
+          - id: data
+            dir: /data
+        healthCheck:
+          type: HTTP
+          port: http
+          http:
+            path: /health
+
+    - name: client
+      icon: https://raw.githubusercontent.com/619dev/guideng/main/client/public/assets/guideng-logo.png
+      template: PREBUILT
+      dependencies:
+        - server
+      spec:
+        source:
+          image: facilisvelox/guideng-client:latest
+        ports:
+          - id: http
+            port: 80
+            type: HTTP

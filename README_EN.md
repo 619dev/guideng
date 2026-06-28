@@ -10,6 +10,7 @@ Guideng is a self-hosted family location sharing app. It has a Rust server in `s
 - Custom device names.
 - Chinese and English UI.
 - Map provider switcher for Baidu Maps, AMap, Google Maps, and Apple Maps.
+- Automatic coordinate conversion for China map providers: AMap/Apple use GCJ-02, Baidu uses BD-09, while the database keeps raw GPS coordinates.
 - SQLite database storage with one week of location history per device.
 - Docker, Docker Compose, and Zeabur deployment templates.
 
@@ -45,6 +46,10 @@ cd client
 npm install
 npm run dev
 ```
+
+## Client Assets
+
+The app logo is stored at `client/public/assets/guideng-logo.png`. In the client, reference it as `/assets/guideng-logo.png`; Android/iOS wrappers can reuse the same asset.
 
 ## Build Docker Images
 

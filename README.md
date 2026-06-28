@@ -12,6 +12,7 @@
 - 支持自定义设备名称。
 - 支持中文和英文界面。
 - 支持百度地图、高德地图、Google Maps、Apple Maps。
+- 国内地图展示时自动处理坐标偏移：高德/Apple 使用 GCJ-02，百度使用 BD-09，数据库保留原始 GPS 坐标。
 - 使用 SQLite 数据库保存数据。
 - 记录每个设备最近 7 天的行动轨迹。
 - 提供 Dockerfile、Docker Compose 和 Zeabur 部署模板。
@@ -57,6 +58,10 @@ cd client
 npm install
 npm run dev
 ```
+
+## 客户端资源
+
+App logo 位于 `client/public/assets/guideng-logo.png`。在客户端中可通过 `/assets/guideng-logo.png` 引用，后续封装 Android/iOS 时也可以从该路径取用。
 
 ## Docker 镜像构建
 
