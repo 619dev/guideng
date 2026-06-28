@@ -96,10 +96,13 @@ build_and_push() {
   local context="$2"
   local also_latest="$3"
   shift 3
-  local extra_args=("$@")
 
   local tags=("-t" "${image}:${TAG}")
   [[ "$also_latest" == "yes" ]] && tags+=("-t" "${image}:latest")
+  local build_args=("${tags[@]}")
+  if [[ "$#" -gt 0 ]]; then
+    build_args+=("$@")
+  fi
 
   local tag_display="${image}:${TAG}"
   [[ "$also_latest" == "yes" ]] && tag_display="${tag_display}, ${image}:latest"
@@ -114,16 +117,14 @@ build_and_push() {
       log "Mode: build + push (depot)"
       depot build \
         --platform "$PLATFORM" \
-        "${tags[@]}" \
-        "${extra_args[@]}" \
+        "${build_args[@]}" \
         --push \
         "$context"
     else
       log "Mode: build only (depot)"
       depot build \
         --platform "$PLATFORM" \
-        "${tags[@]}" \
-        "${extra_args[@]}" \
+        "${build_args[@]}" \
         --load \
         "$context"
     fi
@@ -134,8 +135,7 @@ build_and_push() {
       log "Mode: build + push (buildx)"
       docker buildx build \
         --platform "$PLATFORM" \
-        "${tags[@]}" \
-        "${extra_args[@]}" \
+        "${build_args[@]}" \
         --push \
         "$context"
     else
@@ -144,14 +144,12 @@ build_and_push() {
         warn "Multi-platform build without push cannot be loaded into local Docker; validating build only"
         docker buildx build \
           --platform "$PLATFORM" \
-          "${tags[@]}" \
-          "${extra_args[@]}" \
+          "${build_args[@]}" \
           "$context"
       else
         docker buildx build \
           --platform "$PLATFORM" \
-          "${tags[@]}" \
-          "${extra_args[@]}" \
+          "${build_args[@]}" \
           --load \
           "$context"
       fi
