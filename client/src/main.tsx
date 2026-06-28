@@ -221,9 +221,12 @@ function App() {
   return (
     <main className="app-shell">
       <header className="topbar">
-        <div>
+        <div className="brand-lockup">
+          <img src="/assets/guideng-logo.png" alt="" />
+          <div>
           <h1>{t.app}</h1>
           <p>{t.subtitle}</p>
+          </div>
         </div>
         <div className="top-actions">
           <button className="icon-button" title="Language" onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')}>
@@ -327,9 +330,12 @@ function Login({ lang, setLang, onLogin }: { lang: Lang; setLang: (lang: Lang) =
   return (
     <main className="login-screen">
       <div className="login-head">
-        <div>
+        <div className="brand-lockup">
+          <img src="/assets/guideng-logo.png" alt="" />
+          <div>
           <h1>{t.app}</h1>
           <p>{t.subtitle}</p>
+          </div>
         </div>
         <button className="icon-button" title="Language" onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')}>
           <Languages size={18} />

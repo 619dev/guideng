@@ -54,6 +54,22 @@ button:disabled {
   border-bottom: 1px solid #ded6c7;
 }
 
+.brand-lockup {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand-lockup img {
+  width: 52px;
+  height: 52px;
+  flex: 0 0 auto;
+  border-radius: 12px;
+  object-fit: cover;
+  box-shadow: 0 8px 20px rgb(23 32 28 / 12%);
+}
+
 h1,
 h2,
 p {
@@ -307,6 +323,7 @@ dd {
   min-height: 100vh;
   display: grid;
   grid-template-rows: auto 1fr;
+  align-items: start;
   background: linear-gradient(180deg, #fffaf0 0%, #e3eadf 100%);
 }
 
@@ -380,39 +397,104 @@ dd {
 @media (max-width: 880px) {
   .workspace {
     grid-template-columns: 1fr;
+    display: block;
   }
 
   .map-pane {
-    min-height: 430px;
+    height: min(58vh, 520px);
+    min-height: 360px;
   }
 
   .side-panel {
     border-left: 0;
     border-top: 1px solid #d7d1c4;
+    overflow: visible;
   }
 }
 
 @media (max-width: 560px) {
-  .topbar,
-  .login-head,
   .control-band,
   .map-toolbar {
     align-items: stretch;
   }
 
-  .topbar,
   .control-band,
   .map-toolbar {
     flex-direction: column;
   }
 
+  .topbar,
+  .login-head {
+    padding: 14px 16px;
+  }
+
+  .brand-lockup {
+    gap: 10px;
+  }
+
+  .brand-lockup img {
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+  }
+
+  h1 {
+    font-size: 28px;
+  }
+
+  .topbar p,
+  .login-head p {
+    margin-top: 4px;
+    font-size: 13px;
+  }
+
   .top-actions {
-    align-self: flex-end;
+    flex: 0 0 auto;
+  }
+
+  .control-band {
+    padding: 10px 16px;
+  }
+
+  .map-pane {
+    height: 52vh;
+    min-height: 330px;
+  }
+
+  .map-toolbar {
+    padding: 10px 16px;
   }
 
   .map-toolbar label,
   .map-toolbar button,
   .map-toolbar select {
     width: 100%;
+  }
+
+  .profile-panel {
+    padding: 14px 16px;
+  }
+
+  .device-list {
+    padding: 12px;
+  }
+
+  .login-screen {
+    min-height: 100dvh;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .login-form {
+    width: 100%;
+    align-self: start;
+    min-height: calc(100dvh - 73px);
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    padding: 18px 16px 24px;
+  }
+
+  .agreement-panel {
+    max-height: 28vh;
   }
 }
