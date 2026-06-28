@@ -1,11 +1,11 @@
 use std::{
     env,
     net::SocketAddr,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use axum::{
     extract::{Path as AxumPath, Query, State},
     http::{header, HeaderMap, HeaderValue, Method, StatusCode},
@@ -15,10 +15,16 @@ use axum::{
     Json, Router,
 };
 use chrono::{DateTime, Duration, Utc};
+use rand::{rngs::OsRng, Rng};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use uuid::Uuid;
+
+const TOKEN_LEN: usize = 128;
+const TOKEN_CHARS: &[u8] =
+    b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!@#$%^&*()-_=+[]{}:,.?/";
 
 #[derive(Clone)]
 struct AppState {
@@ -87,18 +93,23 @@ struct TrackQuery {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .init();
+    let _log_guard = setup_logging()?;
 
-    let token = env::var("GUIDENG_TOKEN")
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-        .context("GUIDENG_TOKEN is required")?;
+    let token = load_or_generate_token();
     let bind = env::var("GUIDENG_BIND").unwrap_or_else(|_| "0.0.0.0:8080".to_string());
     let database_url =
         env::var("GUIDENG_DATABASE_URL").unwrap_or_else(|_| "/data/guideng.sqlite3".to_string());
     let cors_origins = env::var("GUIDENG_CORS_ORIGINS").unwrap_or_else(|_| "*".to_string());
+
+    if env::var("GUIDENG_TOKEN")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .is_some()
+    {
+        tracing::info!("using GUIDENG_TOKEN from environment");
+    } else {
+        tracing::warn!("GUIDENG_TOKEN was not set; generated startup token: {token}");
+    }
 
     let store = Store::open(PathBuf::from(database_url))?;
     let state = AppState {
@@ -128,6 +139,77 @@ async fn main() -> Result<()> {
         .await?;
 
     Ok(())
+}
+
+fn setup_logging() -> Result<tracing_appender::non_blocking::WorkerGuard> {
+    let log_path = default_log_path()?;
+    if let Some(parent) = log_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let log_dir = log_path
+        .parent()
+        .ok_or_else(|| anyhow!("invalid GUIDENG_LOG_PATH"))?;
+    let log_file = log_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| anyhow!("invalid GUIDENG_LOG_PATH"))?;
+    let file_appender = tracing_appender::rolling::never(log_dir, log_file);
+    let (file_writer, guard) = tracing_appender::non_blocking(file_appender);
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| "guideng_server=info,tower_http=info".into());
+
+    tracing_subscriber::registry()
+        .with(env_filter)
+        .with(tracing_subscriber::fmt::layer().with_writer(std::io::stdout))
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(file_writer)
+                .with_ansi(false),
+        )
+        .init();
+
+    tracing::info!("log file: {}", log_path.display());
+    Ok(guard)
+}
+
+fn default_log_path() -> Result<PathBuf> {
+    if let Ok(path) = env::var("GUIDENG_LOG_PATH") {
+        let path = path.trim();
+        if !path.is_empty() {
+            return Ok(PathBuf::from(path));
+        }
+    }
+
+    let cwd = env::current_dir()?;
+    if cwd.file_name().and_then(|name| name.to_str()) == Some("server") {
+        return Ok(cwd.join("guideng.log"));
+    }
+
+    let server_dir = cwd.join("server");
+    if Path::new(&server_dir).is_dir() {
+        return Ok(server_dir.join("guideng.log"));
+    }
+
+    Ok(cwd.join("guideng.log"))
+}
+
+fn load_or_generate_token() -> String {
+    env::var("GUIDENG_TOKEN")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(generate_token)
+}
+
+fn generate_token() -> String {
+    let mut rng = OsRng;
+    (0..TOKEN_LEN)
+        .map(|_| {
+            let index = rng.gen_range(0..TOKEN_CHARS.len());
+            TOKEN_CHARS[index] as char
+        })
+        .collect()
 }
 
 async fn shutdown_signal() {

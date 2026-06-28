@@ -46,6 +46,13 @@ const i18n = {
     token: 'Token',
     deviceName: '设备名称',
     login: '进入',
+    loginConsent: '我已阅读并同意隐私规则和使用许可协议',
+    privacyTitle: '隐私规则',
+    privacyText:
+      '归灯会在你登录后请求浏览器定位权限，并把设备名称、设备标识、当前位置、精度、速度、方向、时间和最近 7 天轨迹发送到你填写的自建服务器。数据由你的服务器保存，应用不会把数据发送到其他归灯官方服务。落款：FM619 TECHNOLOG LTD。联系方式：4722522@gmail.com。',
+    licenseTitle: '使用许可协议',
+    licenseText:
+      '你应只在自己拥有权限的设备上使用归灯，并确保参与共享位置的家人知情同意。你需要自行保管服务器地址和 Token；任何持有 Token 的人都可能访问位置数据。归灯按现状提供，不承诺适用于紧急救援、医疗、执法或其他高风险场景。落款：FM619 TECHNOLOG LTD。联系方式：4722522@gmail.com。',
     logout: '退出',
     locating: '定位中',
     sharing: '正在共享',
@@ -70,6 +77,13 @@ const i18n = {
     token: 'Token',
     deviceName: 'Device name',
     login: 'Enter',
+    loginConsent: 'I have read and agree to the privacy rules and license agreement',
+    privacyTitle: 'Privacy Rules',
+    privacyText:
+      'After login, Guideng requests browser location permission and sends device name, device ID, current location, accuracy, speed, heading, timestamps, and the latest 7 days of tracks to the self-hosted server you enter. The data is stored by your server. The app does not send data to any official Guideng service. Signed by: FM619 TECHNOLOG LTD. Contact: 4722522@gmail.com.',
+    licenseTitle: 'License Agreement',
+    licenseText:
+      'Use Guideng only on devices you are authorized to use, and make sure family members who share location are informed and have agreed. You are responsible for protecting the server URL and token; anyone with the token may access location data. Guideng is provided as is and is not intended for emergency rescue, medical, law enforcement, or other high-risk use. Signed by: FM619 TECHNOLOG LTD. Contact: 4722522@gmail.com.',
     logout: 'Log out',
     locating: 'Locating',
     sharing: 'Sharing',
@@ -306,8 +320,9 @@ function Login({ lang, setLang, onLogin }: { lang: Lang; setLang: (lang: Lang) =
   const t = i18n[lang];
   const [serverUrl, setServerUrl] = useState(import.meta.env.VITE_DEFAULT_SERVER_URL || '');
   const [token, setToken] = useState('');
-  const [deviceName, setDeviceName] = useState(defaultDeviceName());
+  const [acceptedAgreement, setAcceptedAgreement] = useState(false);
   const deviceId = useMemo(() => crypto.randomUUID(), []);
+  const canLogin = Boolean(serverUrl.trim() && token.trim() && acceptedAgreement);
 
   return (
     <main className="login-screen">
@@ -326,9 +341,9 @@ function Login({ lang, setLang, onLogin }: { lang: Lang; setLang: (lang: Lang) =
           event.preventDefault();
           onLogin({
             serverUrl: normalizeServerUrl(serverUrl),
-            token,
+            token: token.trim(),
             deviceId,
-            deviceName: deviceName.trim() || defaultDeviceName(),
+            deviceName: defaultDeviceName(),
           });
         }}
       >
@@ -340,11 +355,20 @@ function Login({ lang, setLang, onLogin }: { lang: Lang; setLang: (lang: Lang) =
           {t.token}
           <input value={token} onChange={(event) => setToken(event.target.value)} type="password" required />
         </label>
-        <label>
-          {t.deviceName}
-          <input value={deviceName} onChange={(event) => setDeviceName(event.target.value)} required />
+
+        <section className="agreement-panel">
+          <h2>{t.privacyTitle}</h2>
+          <p>{t.privacyText}</p>
+          <h2>{t.licenseTitle}</h2>
+          <p>{t.licenseText}</p>
+        </section>
+
+        <label className="agreement-check">
+          <input type="checkbox" checked={acceptedAgreement} onChange={(event) => setAcceptedAgreement(event.target.checked)} />
+          <span>{t.loginConsent}</span>
         </label>
-        <button className="primary-button" type="submit">
+
+        <button className="primary-button" type="submit" disabled={!canLogin}>
           <LocateFixed size={18} />
           {t.login}
         </button>

@@ -3,9 +3,10 @@ services:
     build:
       context: ./server
     environment:
-      GUIDENG_TOKEN: ${GUIDENG_TOKEN:-change-me}
+      GUIDENG_TOKEN: ${GUIDENG_TOKEN:-}
       GUIDENG_BIND: 0.0.0.0:8080
       GUIDENG_DATABASE_URL: /data/guideng.sqlite3
+      GUIDENG_LOG_PATH: /data/guideng.log
       GUIDENG_CORS_ORIGINS: ${GUIDENG_CORS_ORIGINS:-*}
     volumes:
       - guideng-data:/data
