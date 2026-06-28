@@ -1,0 +1,26 @@
+services:
+  server:
+    build:
+      context: ./server
+    environment:
+      GUIDENG_TOKEN: ${GUIDENG_TOKEN:-change-me}
+      GUIDENG_BIND: 0.0.0.0:8080
+      GUIDENG_DATABASE_URL: /data/guideng.sqlite3
+      GUIDENG_CORS_ORIGINS: ${GUIDENG_CORS_ORIGINS:-*}
+    volumes:
+      - guideng-data:/data
+    ports:
+      - "8080:8080"
+
+  client:
+    build:
+      context: ./client
+      args:
+        VITE_DEFAULT_SERVER_URL: ${VITE_DEFAULT_SERVER_URL:-http://localhost:8080}
+    ports:
+      - "3000:80"
+    depends_on:
+      - server
+
+volumes:
+  guideng-data:

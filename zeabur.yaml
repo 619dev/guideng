@@ -1,0 +1,30 @@
+name: guideng
+services:
+  server:
+    source:
+      type: dockerfile
+      path: ./server
+    ports:
+      - id: http
+        port: 8080
+        type: HTTP
+    env:
+      GUIDENG_BIND: 0.0.0.0:8080
+      GUIDENG_DATABASE_URL: /data/guideng.sqlite3
+      GUIDENG_CORS_ORIGINS: "*"
+      GUIDENG_TOKEN:
+        default: change-me
+    volumes:
+      - id: data
+        dir: /data
+  client:
+    source:
+      type: dockerfile
+      path: ./client
+    ports:
+      - id: http
+        port: 80
+        type: HTTP
+    env:
+      VITE_DEFAULT_SERVER_URL:
+        default: ""
