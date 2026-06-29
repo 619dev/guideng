@@ -4,7 +4,6 @@ import { ExternalLink, Languages, LocateFixed, LogOut, MapPinned, RefreshCw, Rou
 import './styles.css';
 
 type Lang = 'zh' | 'en';
-type MapProvider = 'baidu' | 'amap' | 'google' | 'apple';
 
 type Device = {
   id: string;
@@ -34,9 +33,25 @@ type Session = {
   deviceName: string;
 };
 
+type AppConfig = {
+  provider: 'amap';
+  amap_web_js_api_key?: string | null;
+  amap_web_js_security_code?: string | null;
+  amap_android_key?: string | null;
+  amap_ios_key?: string | null;
+};
+
+declare global {
+  interface Window {
+    AMap?: any;
+    _AMapSecurityConfig?: {
+      securityJsCode?: string;
+    };
+  }
+}
+
 const storageKey = 'guideng.session';
 const langKey = 'guideng.lang';
-const providerKey = 'guideng.mapProvider';
 
 const i18n = {
   zh: {
@@ -62,6 +77,8 @@ const i18n = {
     editName: '改名',
     provider: '地图',
     openMap: '打开地图',
+    mapKeyMissing: '请先在服务端配置高德 Web JS API Key。',
+    mapLoading: '地图加载中',
     track: '轨迹',
     trackPoints: '轨迹点',
     accuracy: '精度',
@@ -93,6 +110,8 @@ const i18n = {
     editName: 'Rename',
     provider: 'Map',
     openMap: 'Open map',
+    mapKeyMissing: 'Configure the AMap Web JS API key on the server first.',
+    mapLoading: 'Loading map',
     track: 'Track',
     trackPoints: 'Track points',
     accuracy: 'Accuracy',
@@ -105,9 +124,9 @@ const i18n = {
 
 function App() {
   const [lang, setLang] = useState<Lang>(() => (localStorage.getItem(langKey) as Lang) || preferredLang());
-  const [provider, setProvider] = useState<MapProvider>(() => (localStorage.getItem(providerKey) as MapProvider) || 'amap');
   const [session, setSession] = useState<Session | null>(() => readSession());
   const [devices, setDevices] = useState<Device[]>([]);
+  const [appConfig, setAppConfig] = useState<AppConfig | null>(null);
   const [selectedDeviceId, setSelectedDeviceId] = useState('');
   const [tracks, setTracks] = useState<Location[]>([]);
   const [editingName, setEditingName] = useState('');
@@ -120,13 +139,11 @@ function App() {
   }, [lang]);
 
   useEffect(() => {
-    localStorage.setItem(providerKey, provider);
-  }, [provider]);
-
-  useEffect(() => {
     if (!session) return;
     setEditingName(session.deviceName);
-    registerDevice(session).then(() => refreshDevices(session)).catch(showError);
+    registerDevice(session)
+      .then(() => Promise.all([refreshDevices(session), refreshConfig(session)]))
+      .catch(showError);
   }, [session]);
 
   useEffect(() => {
@@ -184,6 +201,12 @@ function App() {
     setTracks(nextTracks);
   }
 
+  async function refreshConfig(activeSession = session) {
+    if (!activeSession) return;
+    const nextConfig = await api<AppConfig>(activeSession, '/api/config');
+    setAppConfig(nextConfig);
+  }
+
   async function saveName() {
     if (!session) return;
     const name = editingName.trim();
@@ -216,7 +239,6 @@ function App() {
   }
 
   const selected = devices.find((device) => device.id === selectedDeviceId) || newestLocatedDevice(devices);
-  const mapUrl = selected?.last_location ? trackLink(provider, tracks, selected.name) || mapLink(provider, selected.last_location, selected.name) : '';
 
   return (
     <main className="app-shell">
@@ -263,12 +285,7 @@ function App() {
           <div className="map-toolbar">
             <label>
               {t.provider}
-              <select value={provider} onChange={(event) => setProvider(event.target.value as MapProvider)}>
-                <option value="baidu">百度地图</option>
-                <option value="amap">高德地图</option>
-                <option value="google">Google Maps</option>
-                <option value="apple">Apple Maps</option>
-              </select>
+              <span className="map-provider-name">高德地图</span>
             </label>
             <button onClick={() => refreshDevices()} title={t.refresh}>
               <RefreshCw size={16} />
@@ -276,7 +293,7 @@ function App() {
             </button>
           </div>
           {selected?.last_location ? (
-            <iframe title="map" src={mapUrl} className="map-frame" loading="lazy" />
+            <AmapView config={appConfig} device={selected} tracks={tracks} lang={lang} />
           ) : (
             <div className="empty-map">
               <MapPinned size={44} />
@@ -307,7 +324,6 @@ function App() {
                 active={device.id === selected?.id}
                 device={device}
                 lang={lang}
-                provider={provider}
                 trackCount={device.id === selected?.id ? tracks.length : undefined}
                 onSelect={() => setSelectedDeviceId(device.id)}
               />
@@ -383,18 +399,112 @@ function Login({ lang, setLang, onLogin }: { lang: Lang; setLang: (lang: Lang) =
   );
 }
 
+function AmapView({ config, device, tracks, lang }: { config: AppConfig | null; device: Device; tracks: Location[]; lang: Lang }) {
+  const t = i18n[lang];
+  const containerRef = React.useRef<HTMLDivElement | null>(null);
+  const [loading, setLoading] = useState(false);
+  const key = config?.amap_web_js_api_key?.trim();
+  const securityCode = config?.amap_web_js_security_code?.trim();
+  const location = device.last_location;
+
+  useEffect(() => {
+    if (!containerRef.current || !location || !key) return;
+    let cancelled = false;
+    let map: any = null;
+    setLoading(true);
+
+    loadAmap(key, securityCode)
+      .then((AMap) => {
+        if (cancelled || !containerRef.current) return;
+        const center = mapCoordinate(location);
+        const trackPath = tracks.map(mapCoordinate).map((point) => [point.longitude, point.latitude]);
+        map = new AMap.Map(containerRef.current, {
+          center: [center.longitude, center.latitude],
+          zoom: 15,
+          viewMode: '2D',
+        });
+        const marker = new AMap.Marker({
+          position: [center.longitude, center.latitude],
+          title: device.name,
+          map,
+        });
+        if (trackPath.length > 1) {
+          const polyline = new AMap.Polyline({
+            path: trackPath,
+            strokeColor: '#2f8f4e',
+            strokeWeight: 6,
+            strokeOpacity: 0.9,
+            map,
+          });
+          map.setFitView([polyline, marker], false, [60, 60, 60, 60]);
+        }
+      })
+      .catch((error) => {
+        console.error(error);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+      if (map) map.destroy();
+    };
+  }, [device.id, device.name, key, securityCode, location?.latitude, location?.longitude, tracks]);
+
+  if (!key) {
+    return (
+      <div className="empty-map">
+        <MapPinned size={44} />
+        <span>{t.mapKeyMissing}</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="amap-wrap">
+      {loading && <div className="map-loading">{t.mapLoading}</div>}
+      <div ref={containerRef} className="amap-view" />
+    </div>
+  );
+}
+
+function loadAmap(key: string, securityCode?: string) {
+  if (window.AMap) return Promise.resolve(window.AMap);
+  if (securityCode) {
+    window._AMapSecurityConfig = {
+      securityJsCode: securityCode,
+    };
+  }
+
+  return new Promise<any>((resolve, reject) => {
+    const existing = document.querySelector<HTMLScriptElement>('script[data-guideng-amap="true"]');
+    if (existing) {
+      existing.addEventListener('load', () => resolve(window.AMap));
+      existing.addEventListener('error', reject);
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.dataset.guidengAmap = 'true';
+    script.src = `https://webapi.amap.com/maps?v=2.0&key=${encodeURIComponent(key)}`;
+    script.async = true;
+    script.onload = () => resolve(window.AMap);
+    script.onerror = reject;
+    document.head.appendChild(script);
+  });
+}
+
 function DeviceCard({
   active,
   device,
   lang,
-  provider,
   trackCount,
   onSelect,
 }: {
   active: boolean;
   device: Device;
   lang: Lang;
-  provider: MapProvider;
   trackCount?: number;
   onSelect: () => void;
 }) {
@@ -408,7 +518,7 @@ function DeviceCard({
           <p>{location ? formatTime(location.received_at, lang) : t.noLocation}</p>
         </div>
         {location && (
-          <a title={t.openMap} href={mapLink(provider, location, device.name)} target="_blank" rel="noreferrer">
+          <a title={t.openMap} href={mapLink(location, device.name)} target="_blank" rel="noreferrer">
             <ExternalLink size={17} />
           </a>
         )}
@@ -480,44 +590,26 @@ async function sendLocation(session: Session, position: GeolocationPosition) {
   });
 }
 
-function mapLink(provider: MapProvider, location: Location, name: string) {
-  const { latitude: lat, longitude: lng } = mapCoordinate(provider, location);
+function mapLink(location: Location, name: string) {
+  const { latitude: lat, longitude: lng } = mapCoordinate(location);
   const label = encodeURIComponent(name);
-  if (provider === 'baidu') return `https://api.map.baidu.com/marker?location=${lat},${lng}&title=${label}&content=${label}&output=html`;
-  if (provider === 'amap') return `https://uri.amap.com/marker?position=${lng},${lat}&name=${label}`;
-  if (provider === 'apple') return `https://maps.apple.com/?ll=${lat},${lng}&q=${label}`;
-  return `https://www.google.com/maps?q=${lat},${lng}(${label})&output=embed`;
+  return `https://uri.amap.com/marker?position=${lng},${lat}&name=${label}`;
 }
 
-function trackLink(provider: MapProvider, locations: Location[], name: string) {
+function trackLink(locations: Location[], name: string) {
   if (locations.length < 2) return '';
   const label = encodeURIComponent(name);
-  const points = locations.slice(-50).map((location) => mapCoordinate(provider, location));
+  const points = locations.slice(-50).map(mapCoordinate);
   const last = points[points.length - 1];
 
-  if (provider === 'amap') {
-    const origin = `${points[0].longitude},${points[0].latitude}`;
-    const destination = `${last.longitude},${last.latitude}`;
-    return `https://uri.amap.com/navigation?from=${origin},start&to=${destination},${label}&mode=car`;
-  }
-
-  if (provider === 'apple') {
-    return `https://maps.apple.com/?ll=${last.latitude},${last.longitude}&q=${label}`;
-  }
-
-  if (provider === 'baidu') {
-    return `https://api.map.baidu.com/direction?origin=${points[0].latitude},${points[0].longitude}&destination=${last.latitude},${last.longitude}&mode=driving&output=html`;
-  }
-
-  const path = points.map((point) => `${point.latitude},${point.longitude}`).join('/');
-  return `https://www.google.com/maps/dir/${path}`;
+  const origin = `${points[0].longitude},${points[0].latitude}`;
+  const destination = `${last.longitude},${last.latitude}`;
+  return `https://uri.amap.com/navigation?from=${origin},start&to=${destination},${label}&mode=car`;
 }
 
-function mapCoordinate(provider: MapProvider, location: Location) {
+function mapCoordinate(location: Location) {
   const wgs84 = { latitude: location.latitude, longitude: location.longitude };
-  if (provider === 'baidu') return gcj02ToBd09(wgs84ToGcj02(wgs84));
-  if (provider === 'amap' || provider === 'apple') return wgs84ToGcj02(wgs84);
-  return wgs84;
+  return wgs84ToGcj02(wgs84);
 }
 
 function wgs84ToGcj02(point: { latitude: number; longitude: number }) {
@@ -537,17 +629,6 @@ function wgs84ToGcj02(point: { latitude: number; longitude: number }) {
   return {
     latitude: point.latitude + dLat,
     longitude: point.longitude + dLng,
-  };
-}
-
-function gcj02ToBd09(point: { latitude: number; longitude: number }) {
-  const x = point.longitude;
-  const y = point.latitude;
-  const z = Math.sqrt(x * x + y * y) + 0.00002 * Math.sin(y * Math.PI * 3000.0 / 180.0);
-  const theta = Math.atan2(y, x) + 0.000003 * Math.cos(x * Math.PI * 3000.0 / 180.0);
-  return {
-    latitude: z * Math.sin(theta) + 0.006,
-    longitude: z * Math.cos(theta) + 0.0065,
   };
 }
 

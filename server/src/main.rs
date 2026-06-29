@@ -30,11 +30,21 @@ const TOKEN_CHARS: &[u8] =
 struct AppState {
     token: Arc<String>,
     store: Store,
+    map_config: MapConfig,
 }
 
 #[derive(Clone)]
 struct Store {
     db: Arc<Mutex<Connection>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct MapConfig {
+    provider: &'static str,
+    amap_web_js_api_key: Option<String>,
+    amap_web_js_security_code: Option<String>,
+    amap_android_key: Option<String>,
+    amap_ios_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -100,6 +110,7 @@ async fn main() -> Result<()> {
     let database_url =
         env::var("GUIDENG_DATABASE_URL").unwrap_or_else(|_| "/data/guideng.sqlite3".to_string());
     let cors_origins = env::var("GUIDENG_CORS_ORIGINS").unwrap_or_else(|_| "*".to_string());
+    let map_config = MapConfig::from_env();
 
     if env::var("GUIDENG_TOKEN")
         .ok()
@@ -115,9 +126,11 @@ async fn main() -> Result<()> {
     let state = AppState {
         token: Arc::new(token),
         store,
+        map_config,
     };
 
     let api = Router::new()
+        .route("/config", get(get_config))
         .route("/devices", get(list_devices).post(register_device))
         .route("/devices/:id", patch(update_device))
         .route("/devices/:id/location", post(update_location))
@@ -212,6 +225,25 @@ fn generate_token() -> String {
         .collect()
 }
 
+impl MapConfig {
+    fn from_env() -> Self {
+        Self {
+            provider: "amap",
+            amap_web_js_api_key: read_optional_env("GUIDENG_AMAP_WEB_JS_API_KEY"),
+            amap_web_js_security_code: read_optional_env("GUIDENG_AMAP_WEB_JS_SECURITY_CODE"),
+            amap_android_key: read_optional_env("GUIDENG_AMAP_ANDROID_KEY"),
+            amap_ios_key: read_optional_env("GUIDENG_AMAP_IOS_KEY"),
+        }
+    }
+}
+
+fn read_optional_env(key: &str) -> Option<String> {
+    env::var(key)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
 async fn shutdown_signal() {
     let _ = tokio::signal::ctrl_c().await;
 }
@@ -274,6 +306,10 @@ async fn auth(
 
 async fn health() -> Json<serde_json::Value> {
     Json(serde_json::json!({ "ok": true, "name": "guideng" }))
+}
+
+async fn get_config(State(state): State<AppState>) -> Json<MapConfig> {
+    Json(state.map_config.clone())
 }
 
 async fn list_devices(State(state): State<AppState>) -> Result<Json<Vec<Device>>, ApiError> {

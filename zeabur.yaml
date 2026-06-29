@@ -14,6 +14,22 @@ spec:
       type: PASSWORD
       name: Shared Token
       description: Shared token for all Guideng clients. Leave empty to let the server generate one on startup.
+    - key: GUIDENG_AMAP_WEB_JS_API_KEY
+      type: STRING
+      name: AMap Web JS API Key
+      description: AMap Web JavaScript API key for the web client.
+    - key: GUIDENG_AMAP_WEB_JS_SECURITY_CODE
+      type: PASSWORD
+      name: AMap Web JS Security Code
+      description: AMap Web JavaScript API security code paired with the web key.
+    - key: GUIDENG_AMAP_ANDROID_KEY
+      type: STRING
+      name: AMap Android Key
+      description: AMap Android SDK key for future Android app builds.
+    - key: GUIDENG_AMAP_IOS_KEY
+      type: STRING
+      name: AMap iOS Key
+      description: AMap iOS SDK key for future iOS app builds.
   readme: |-
     # Guideng
 
@@ -47,6 +63,14 @@ spec:
             default: "*"
           GUIDENG_TOKEN:
             default: ${GUIDENG_TOKEN}
+          GUIDENG_AMAP_WEB_JS_API_KEY:
+            default: ${GUIDENG_AMAP_WEB_JS_API_KEY}
+          GUIDENG_AMAP_WEB_JS_SECURITY_CODE:
+            default: ${GUIDENG_AMAP_WEB_JS_SECURITY_CODE}
+          GUIDENG_AMAP_ANDROID_KEY:
+            default: ${GUIDENG_AMAP_ANDROID_KEY}
+          GUIDENG_AMAP_IOS_KEY:
+            default: ${GUIDENG_AMAP_IOS_KEY}
         volumes:
           - id: data
             dir: /data

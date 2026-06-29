@@ -11,8 +11,8 @@
 - 通过浏览器 Geolocation API 获取移动设备位置。
 - 支持自定义设备名称。
 - 支持中文和英文界面。
-- 支持百度地图、高德地图、Google Maps、Apple Maps。
-- 国内地图展示时自动处理坐标偏移：高德/Apple 使用 GCJ-02，百度使用 BD-09，数据库保留原始 GPS 坐标。
+- 支持高德地图。
+- 国内地图展示时自动处理坐标偏移：高德使用 GCJ-02，数据库保留原始 GPS 坐标。
 - 使用 SQLite 数据库保存数据。
 - 记录每个设备最近 7 天的行动轨迹。
 - 提供 Dockerfile、Docker Compose 和 Zeabur 部署模板。
@@ -93,6 +93,10 @@ IMAGES=client VITE_DEFAULT_SERVER_URL=https://guideng.example.com ./build-and-pu
 - `GUIDENG_DATABASE_URL`：SQLite 数据库文件路径，默认 `/data/guideng.sqlite3`。
 - `GUIDENG_LOG_PATH`：日志文件路径。默认写入项目 `server/guideng.log`；Docker Compose 中默认写入 `/data/guideng.log`。
 - `GUIDENG_CORS_ORIGINS`：允许跨域访问的来源，多个来源用英文逗号分隔，默认 `*`。
+- `GUIDENG_AMAP_WEB_JS_API_KEY`：高德 Web 端 JavaScript API Key。
+- `GUIDENG_AMAP_WEB_JS_SECURITY_CODE`：高德 Web 端 JavaScript API 安全密钥。
+- `GUIDENG_AMAP_ANDROID_KEY`：高德 Android SDK Key，供以后 Android App 使用。
+- `GUIDENG_AMAP_IOS_KEY`：高德 iOS SDK Key，供以后 iOS App 使用。
 
 ## API
 
@@ -106,6 +110,7 @@ X-Guideng-Token: <token>
 接口列表：
 
 - `GET /health`：健康检查。
+- `GET /api/config`：获取地图供应商和高德 Key 配置。
 - `GET /api/devices`：获取设备列表和每个设备的最新位置。
 - `POST /api/devices`：注册或更新当前设备。
 - `PATCH /api/devices/:id`：修改设备名称或平台信息。

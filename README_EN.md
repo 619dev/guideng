@@ -9,8 +9,8 @@ Guideng is a self-hosted family location sharing app. It has a Rust server in `s
 - Mobile browser location sharing through the Geolocation API.
 - Custom device names.
 - Chinese and English UI.
-- Map provider switcher for Baidu Maps, AMap, Google Maps, and Apple Maps.
-- Automatic coordinate conversion for China map providers: AMap/Apple use GCJ-02, Baidu uses BD-09, while the database keeps raw GPS coordinates.
+- AMap support.
+- Automatic coordinate conversion for China map providers: AMap uses GCJ-02, while the database keeps raw GPS coordinates.
 - SQLite database storage with one week of location history per device.
 - Docker, Docker Compose, and Zeabur deployment templates.
 
@@ -70,6 +70,10 @@ The script builds `guideng-server` and `guideng-client` images. It automatically
 - `GUIDENG_DATABASE_URL`: SQLite database file, default `/data/guideng.sqlite3`.
 - `GUIDENG_LOG_PATH`: log file path. By default it writes to `server/guideng.log`; Docker Compose sets it to `/data/guideng.log`.
 - `GUIDENG_CORS_ORIGINS`: comma-separated allowed origins, default `*`.
+- `GUIDENG_AMAP_WEB_JS_API_KEY`: AMap Web JavaScript API key.
+- `GUIDENG_AMAP_WEB_JS_SECURITY_CODE`: AMap Web JavaScript API security code.
+- `GUIDENG_AMAP_ANDROID_KEY`: AMap Android SDK key for future Android app builds.
+- `GUIDENG_AMAP_IOS_KEY`: AMap iOS SDK key for future iOS app builds.
 
 ## API
 
@@ -81,6 +85,7 @@ All `/api/*` endpoints require one of:
 Endpoints:
 
 - `GET /health`
+- `GET /api/config`: get map provider and AMap key configuration.
 - `GET /api/devices`
 - `POST /api/devices`
 - `PATCH /api/devices/:id`
