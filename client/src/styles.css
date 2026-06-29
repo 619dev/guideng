@@ -254,6 +254,61 @@ input {
   box-shadow: 0 8px 20px rgb(23 32 28 / 10%);
 }
 
+.device-map-marker {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+  transform: translateY(-2px);
+}
+
+.device-map-pin {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border: 2px solid #ffffff;
+  border-radius: 50% 50% 50% 4px;
+  background: #194d45;
+  box-shadow: 0 8px 18px rgb(23 32 28 / 22%);
+  transform: rotate(-45deg);
+}
+
+.device-map-pin::after {
+  width: 8px;
+  height: 8px;
+  display: block;
+  border-radius: 999px;
+  background: #fffaf0;
+  content: "";
+}
+
+.device-map-label {
+  max-width: 150px;
+  padding: 5px 8px;
+  overflow: hidden;
+  border: 1px solid #ded6c8;
+  border-radius: 8px;
+  background: rgb(255 255 255 / 94%);
+  box-shadow: 0 8px 18px rgb(23 32 28 / 14%);
+  color: #17201c;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.device-map-marker.active .device-map-pin {
+  background: #c33a22;
+}
+
+.device-map-marker.active .device-map-label {
+  border-color: #c33a22;
+  color: #8c1d18;
+}
+
 .empty-map {
   flex: 1;
   display: grid;

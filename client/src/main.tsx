@@ -293,7 +293,14 @@ function App() {
             </button>
           </div>
           {selected?.last_location ? (
-            <AmapView config={appConfig} device={selected} tracks={tracks} lang={lang} />
+            <AmapView
+              config={appConfig}
+              devices={devices}
+              selectedDeviceId={selected.id}
+              tracks={tracks}
+              lang={lang}
+              onSelectDevice={setSelectedDeviceId}
+            />
           ) : (
             <div className="empty-map">
               <MapPinned size={44} />
@@ -399,16 +406,32 @@ function Login({ lang, setLang, onLogin }: { lang: Lang; setLang: (lang: Lang) =
   );
 }
 
-function AmapView({ config, device, tracks, lang }: { config: AppConfig | null; device: Device; tracks: Location[]; lang: Lang }) {
+function AmapView({
+  config,
+  devices,
+  selectedDeviceId,
+  tracks,
+  lang,
+  onSelectDevice,
+}: {
+  config: AppConfig | null;
+  devices: Device[];
+  selectedDeviceId: string;
+  tracks: Location[];
+  lang: Lang;
+  onSelectDevice: (deviceId: string) => void;
+}) {
   const t = i18n[lang];
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const [loading, setLoading] = useState(false);
   const key = config?.amap_web_js_api_key?.trim();
   const securityCode = config?.amap_web_js_security_code?.trim();
-  const location = device.last_location;
+  const locatedDevices = useMemo(() => devices.filter((device) => device.last_location), [devices]);
+  const selectedDevice = locatedDevices.find((device) => device.id === selectedDeviceId) || locatedDevices[0];
+  const location = selectedDevice?.last_location;
 
   useEffect(() => {
-    if (!containerRef.current || !location || !key) return;
+    if (!containerRef.current || !location || !key || !selectedDevice) return;
     let cancelled = false;
     let map: any = null;
     setLoading(true);
@@ -423,10 +446,19 @@ function AmapView({ config, device, tracks, lang }: { config: AppConfig | null; 
           zoom: 15,
           viewMode: '2D',
         });
-        const marker = new AMap.Marker({
-          position: [center.longitude, center.latitude],
-          title: device.name,
-          map,
+        const markers = locatedDevices.map((device) => {
+          const deviceLocation = device.last_location!;
+          const point = mapCoordinate(deviceLocation);
+          const active = device.id === selectedDevice.id;
+          const marker = new AMap.Marker({
+            position: [point.longitude, point.latitude],
+            title: device.name,
+            content: createDeviceMarker(device.name, active),
+            offset: new AMap.Pixel(-18, -46),
+            map,
+          });
+          marker.on('click', () => onSelectDevice(device.id));
+          return marker;
         });
         if (trackPath.length > 1) {
           const polyline = new AMap.Polyline({
@@ -436,7 +468,9 @@ function AmapView({ config, device, tracks, lang }: { config: AppConfig | null; 
             strokeOpacity: 0.9,
             map,
           });
-          map.setFitView([polyline, marker], false, [60, 60, 60, 60]);
+          map.setFitView([polyline, ...markers], false, [60, 60, 60, 60]);
+        } else {
+          map.setFitView(markers, false, [80, 80, 80, 80]);
         }
       })
       .catch((error) => {
@@ -450,7 +484,7 @@ function AmapView({ config, device, tracks, lang }: { config: AppConfig | null; 
       cancelled = true;
       if (map) map.destroy();
     };
-  }, [device.id, device.name, key, securityCode, location?.latitude, location?.longitude, tracks]);
+  }, [key, securityCode, selectedDeviceId, locatedDevices, location?.latitude, location?.longitude, tracks, onSelectDevice]);
 
   if (!key) {
     return (
@@ -467,6 +501,21 @@ function AmapView({ config, device, tracks, lang }: { config: AppConfig | null; 
       <div ref={containerRef} className="amap-view" />
     </div>
   );
+}
+
+function createDeviceMarker(name: string, active: boolean) {
+  const marker = document.createElement('div');
+  marker.className = `device-map-marker ${active ? 'active' : ''}`;
+
+  const pin = document.createElement('div');
+  pin.className = 'device-map-pin';
+
+  const label = document.createElement('div');
+  label.className = 'device-map-label';
+  label.textContent = name;
+
+  marker.append(pin, label);
+  return marker;
 }
 
 function loadAmap(key: string, securityCode?: string) {
