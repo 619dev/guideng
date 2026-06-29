@@ -49,10 +49,10 @@ const i18n = {
     loginConsent: '我已阅读并同意隐私规则和使用许可协议',
     privacyTitle: '隐私规则',
     privacyText:
-      '归灯会在你登录后请求浏览器定位权限，并把设备名称、设备标识、当前位置、精度、速度、方向、时间和最近 7 天轨迹发送到你填写的自建服务器。数据由你的服务器保存，应用不会把数据发送到其他归灯官方服务。落款：FM619 TECHNOLOG LTD。联系方式：4722522@gmail.com。',
+      '归灯会在你登录后请求浏览器定位权限，并把设备名称、设备标识、当前位置、精度、速度、方向、时间和最近 7 天轨迹发送到你填写的自建服务器。数据由你的服务器保存，应用不会把数据发送到其他归灯官方服务。FM619 TECHNOLOG 联系方式：4722522@gmail.com。',
     licenseTitle: '使用许可协议',
     licenseText:
-      '你应只在自己拥有权限的设备上使用归灯，并确保参与共享位置的家人知情同意。你需要自行保管服务器地址和 Token；任何持有 Token 的人都可能访问位置数据。归灯按现状提供，不承诺适用于紧急救援、医疗、执法或其他高风险场景。落款：FM619 TECHNOLOG LTD。联系方式：4722522@gmail.com。',
+      '你应只在自己拥有权限的设备上使用归灯，并确保参与共享位置的家人知情同意。你需要自行保管服务器地址和 Token；任何持有 Token 的人都可能访问位置数据。归灯按现状提供，不承诺适用于紧急救援、医疗、执法或其他高风险场景。FM619 TECHNOLOG 联系方式：4722522@gmail.com。',
     logout: '退出',
     locating: '定位中',
     sharing: '正在共享',
@@ -80,10 +80,10 @@ const i18n = {
     loginConsent: 'I have read and agree to the privacy rules and license agreement',
     privacyTitle: 'Privacy Rules',
     privacyText:
-      'After login, Guideng requests browser location permission and sends device name, device ID, current location, accuracy, speed, heading, timestamps, and the latest 7 days of tracks to the self-hosted server you enter. The data is stored by your server. The app does not send data to any official Guideng service. Signed by: FM619 TECHNOLOG LTD. Contact: 4722522@gmail.com.',
+      'After login, Guideng requests browser location permission and sends device name, device ID, current location, accuracy, speed, heading, timestamps, and the latest 7 days of tracks to the self-hosted server you enter. The data is stored by your server. The app does not send data to any official Guideng service. FM619 TECHNOLOG Contact: 4722522@gmail.com.',
     licenseTitle: 'License Agreement',
     licenseText:
-      'Use Guideng only on devices you are authorized to use, and make sure family members who share location are informed and have agreed. You are responsible for protecting the server URL and token; anyone with the token may access location data. Guideng is provided as is and is not intended for emergency rescue, medical, law enforcement, or other high-risk use. Signed by: FM619 TECHNOLOG LTD. Contact: 4722522@gmail.com.',
+      'Use Guideng only on devices you are authorized to use, and make sure family members who share location are informed and have agreed. You are responsible for protecting the server URL and token; anyone with the token may access location data. Guideng is provided as is and is not intended for emergency rescue, medical, law enforcement, or other high-risk use. FM619 TECHNOLOG Contact: 4722522@gmail.com.',
     logout: 'Log out',
     locating: 'Locating',
     sharing: 'Sharing',
