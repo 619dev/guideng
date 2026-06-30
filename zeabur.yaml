@@ -22,7 +22,6 @@ spec:
       type: STRING
       name: Admin Path
       description: URL path for the Guideng admin console.
-      default: /admin
     - key: GUIDENG_AMAP_WEB_JS_API_KEY
       type: STRING
       name: AMap Web JS API Key
