@@ -11,6 +11,7 @@
 - 通过浏览器 Geolocation API 获取移动设备位置。
 - 支持自定义设备名称。
 - 支持中文和英文界面。
+- 提供中文/英文管理后台，可查看客户端、删除客户端、清理位置记录，并配置自动清理未更新客户端。
 - 支持高德地图。
 - 国内地图展示时自动处理坐标偏移：高德使用 GCJ-02，数据库保留原始 GPS 坐标。
 - 使用 SQLite 数据库保存数据。
@@ -89,6 +90,8 @@ IMAGES=client VITE_DEFAULT_SERVER_URL=https://guideng.example.com ./build-and-pu
 ## 服务端环境变量
 
 - `GUIDENG_TOKEN`：共享 API Token。不设置或为空时，服务端会自动生成 128 字符随机 Token，并输出到日志中。
+- `GUIDENG_ADMIN_PASSWORD`：管理后台密码。不设置或为空时，服务端会自动生成并输出到日志中。
+- `GUIDENG_ADMIN_PATH`：管理后台访问路径，默认 `/admin`。建议部署时改成不容易猜到的路径，例如 `/admin-your-random-path`。
 - `GUIDENG_BIND`：监听地址，默认 `0.0.0.0:8080`。
 - `GUIDENG_DATABASE_URL`：SQLite 数据库文件路径，默认 `/data/guideng.sqlite3`。
 - `GUIDENG_LOG_PATH`：日志文件路径。默认写入项目 `server/guideng.log`；Docker Compose 中默认写入 `/data/guideng.log`。
@@ -118,6 +121,26 @@ X-Guideng-Token: <token>
 - `GET /api/devices/:id/tracks?days=7`：获取设备最近轨迹，最多 7 天。
 
 服务端会保存每次位置上报，并保留最近 7 天的轨迹点。写入新位置时，会自动清理超过 7 天的旧轨迹。
+
+## 管理后台
+
+服务端内置管理后台，默认路径为：
+
+```text
+http://localhost:8080/admin
+```
+
+如果设置了 `GUIDENG_ADMIN_PATH`，请使用对应路径访问。管理密码来自 `GUIDENG_ADMIN_PASSWORD`；如果没有手动设置，服务端会在启动时自动生成并写入日志。
+
+管理后台支持中文和英文，可点击页面右上角的 `English` / `中文` 按钮切换，也可以在地址后追加 `?lang=zh` 或 `?lang=en`。
+
+管理后台可以：
+
+- 查看已注册客户端及其最后位置。
+- 删除单个客户端的位置记录。
+- 删除单个客户端。
+- 手动清理超过指定天数未更新位置的客户端。
+- 设置自动清理天数；留空保存可关闭自动清理。
 
 ## 部署说明
 
@@ -158,10 +181,11 @@ sudo systemctl reload nginx
 127.0.0.1:8080
 ```
 
-配置中只反代服务端接口：
+配置中默认反代：
 
 - `/health`
 - `/api/`
+- `GUIDENG_ADMIN_PATH` 对应的后台路径，例如 `/admin` 或你自定义的随机路径。
 
 ## 数据存储
 

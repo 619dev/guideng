@@ -9,6 +9,7 @@ Guideng is a self-hosted family location sharing app. It has a Rust server in `s
 - Mobile browser location sharing through the Geolocation API.
 - Custom device names.
 - Chinese and English UI.
+- Chinese/English admin console for viewing devices, deleting devices, clearing location records, and configuring automatic cleanup for inactive devices.
 - AMap support.
 - Automatic coordinate conversion for China map providers: AMap uses GCJ-02, while the database keeps raw GPS coordinates.
 - SQLite database storage with one week of location history per device.
@@ -66,6 +67,8 @@ The script builds `guideng-server` and `guideng-client` images. It automatically
 ## Server Environment
 
 - `GUIDENG_TOKEN`: shared API token. When unset or empty, the server generates a 128-character random token and writes it to the log.
+- `GUIDENG_ADMIN_PASSWORD`: admin console password. When unset or empty, the server generates one and writes it to the log.
+- `GUIDENG_ADMIN_PATH`: admin console path, default `/admin`. For deployment, use a hard-to-guess path such as `/admin-your-random-path`.
 - `GUIDENG_BIND`: bind address, default `0.0.0.0:8080`.
 - `GUIDENG_DATABASE_URL`: SQLite database file, default `/data/guideng.sqlite3`.
 - `GUIDENG_LOG_PATH`: log file path. By default it writes to `server/guideng.log`; Docker Compose sets it to `/data/guideng.log`.
@@ -94,6 +97,26 @@ Endpoints:
 
 The server stores every location report and keeps the most recent 7 days of history. Older points are pruned when new locations are written.
 
+## Admin Console
+
+The server includes an admin console. The default path is:
+
+```text
+http://localhost:8080/admin
+```
+
+If you set `GUIDENG_ADMIN_PATH`, open that path instead. The admin password comes from `GUIDENG_ADMIN_PASSWORD`; if it is not set, the server generates one on startup and writes it to the log.
+
+The admin console supports Chinese and English. Use the `English` / `中文` button in the upper right, or append `?lang=zh` or `?lang=en` to the URL.
+
+The admin console can:
+
+- View registered devices and their latest locations.
+- Delete location records for a device.
+- Delete a device.
+- Manually delete devices that have not updated for a specified number of days.
+- Configure automatic cleanup by day count; save an empty value to disable automatic cleanup.
+
 ## Notes
 
 Mobile browsers usually require HTTPS for high-accuracy geolocation outside `localhost`. When deploying, put both client and server behind HTTPS.
@@ -111,7 +134,7 @@ sudo nginx -t
 sudo systemctl reload nginx
 ```
 
-It proxies `/health` and `/api/` to `127.0.0.1:8080`.
+It proxies `/health`, `/api/`, and the `GUIDENG_ADMIN_PATH` admin path, such as `/admin` or your custom random path, to `127.0.0.1:8080`.
 
 ## License
 

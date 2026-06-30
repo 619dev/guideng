@@ -73,6 +73,8 @@ services:
     pull_policy: always
     environment:
       GUIDENG_TOKEN: ${GUIDENG_TOKEN:-}
+      GUIDENG_ADMIN_PASSWORD: ${GUIDENG_ADMIN_PASSWORD:-}
+      GUIDENG_ADMIN_PATH: ${GUIDENG_ADMIN_PATH:-/admin}
       GUIDENG_BIND: 0.0.0.0:8080
       GUIDENG_DATABASE_URL: /data/guideng.sqlite3
       GUIDENG_LOG_PATH: /data/guideng.log
@@ -90,7 +92,7 @@ volumes:
   guideng-data:
 ```
 
-## 4. Set the Token
+## 4. Set the Token and Admin Console
 
 It is recommended to set a fixed token manually:
 
@@ -99,6 +101,15 @@ export GUIDENG_TOKEN='replace-with-a-long-random-token'
 ```
 
 If `GUIDENG_TOKEN` is not set, the server generates a 128-character random token on startup and writes it to the log. In Docker, the log path defaults to `/data/guideng.log` inside the data volume.
+
+For the admin console, set a strong password and a hard-to-guess path:
+
+```bash
+export GUIDENG_ADMIN_PASSWORD='replace-with-a-strong-admin-password'
+export GUIDENG_ADMIN_PATH='/admin-your-random-path'
+```
+
+If `GUIDENG_ADMIN_PASSWORD` is not set, the server generates an admin password and writes it to the log. `GUIDENG_ADMIN_PATH` defaults to `/admin`.
 
 View startup logs:
 
@@ -176,8 +187,19 @@ server {
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
   }
+
+  location /admin-your-random-path {
+    proxy_pass http://127.0.0.1:8080;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+  }
 }
 ```
+
+If you use the default admin path `/admin`, change `location /admin-your-random-path` to `location /admin`. If you set another `GUIDENG_ADMIN_PATH`, the Nginx path must match it.
 
 Enable the site:
 
@@ -269,7 +291,26 @@ For multiple origins, separate them with commas:
 GUIDENG_CORS_ORIGINS=https://app.example.com,https://www.example.com docker compose up -d
 ```
 
-## 10. Common Maintenance Commands
+## 10. Use the Admin Console
+
+The admin console URL is:
+
+```text
+https://example.com/admin-your-random-path
+```
+
+If you use the default path, it is `https://example.com/admin`. The password is `GUIDENG_ADMIN_PASSWORD`; if you did not set it manually, copy the generated admin password from the server log.
+
+The admin console supports Chinese and English. Click the `English` / `中文` button in the upper right, or open:
+
+```text
+https://example.com/admin-your-random-path?lang=zh
+https://example.com/admin-your-random-path?lang=en
+```
+
+The admin console can view devices, delete location records, delete devices, manually clean up inactive devices, and configure automatic cleanup by day count. Saving an empty automatic cleanup value disables automatic cleanup.
+
+## 11. Common Maintenance Commands
 
 View logs:
 
@@ -302,10 +343,11 @@ Stop the service before restoring data:
 docker compose down
 ```
 
-## 11. Security Notes
+## 12. Security Notes
 
 - Do not use an empty token as a long-term setup. If you leave it empty, copy the generated token from the server log.
 - Do not share the token with anyone who should not access location data.
+- Set a strong admin password and change `GUIDENG_ADMIN_PATH` to a hard-to-guess path.
 - Expose only Nginx ports `80` and `443` publicly. Avoid exposing `8080` directly.
 - Back up the SQLite database regularly.
 - If a device cannot get location permission, check whether you are using HTTPS first.

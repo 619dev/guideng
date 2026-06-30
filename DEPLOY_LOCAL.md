@@ -73,6 +73,8 @@ services:
     pull_policy: always
     environment:
       GUIDENG_TOKEN: ${GUIDENG_TOKEN:-}
+      GUIDENG_ADMIN_PASSWORD: ${GUIDENG_ADMIN_PASSWORD:-}
+      GUIDENG_ADMIN_PATH: ${GUIDENG_ADMIN_PATH:-/admin}
       GUIDENG_BIND: 0.0.0.0:8080
       GUIDENG_DATABASE_URL: /data/guideng.sqlite3
       GUIDENG_LOG_PATH: /data/guideng.log
@@ -90,7 +92,7 @@ volumes:
   guideng-data:
 ```
 
-## 4. 设置 Token
+## 4. 设置 Token 和管理后台
 
 推荐手动设置一个固定 Token：
 
@@ -99,6 +101,15 @@ export GUIDENG_TOKEN='replace-with-a-long-random-token'
 ```
 
 如果不设置 `GUIDENG_TOKEN`，服务端会在启动时自动生成一个 128 字符随机 Token，并写入日志。日志默认位于 Docker 数据卷中的 `/data/guideng.log`。
+
+管理后台建议手动设置密码和不容易猜到的路径：
+
+```bash
+export GUIDENG_ADMIN_PASSWORD='replace-with-a-strong-admin-password'
+export GUIDENG_ADMIN_PATH='/admin-your-random-path'
+```
+
+如果不设置 `GUIDENG_ADMIN_PASSWORD`，服务端会自动生成管理密码并写入日志。`GUIDENG_ADMIN_PATH` 默认是 `/admin`。
 
 启动后可以查看日志：
 
@@ -176,8 +187,19 @@ server {
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
   }
+
+  location /admin-your-random-path {
+    proxy_pass http://127.0.0.1:8080;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+  }
 }
 ```
+
+如果你使用默认后台路径 `/admin`，请把上面的 `location /admin-your-random-path` 改成 `location /admin`。如果你设置了其他 `GUIDENG_ADMIN_PATH`，Nginx 中的路径必须保持一致。
 
 启用站点：
 
@@ -269,7 +291,26 @@ GUIDENG_CORS_ORIGINS=https://app.example.com docker compose up -d
 GUIDENG_CORS_ORIGINS=https://app.example.com,https://www.example.com docker compose up -d
 ```
 
-## 10. 常用维护命令
+## 10. 使用管理后台
+
+管理后台地址为：
+
+```text
+https://example.com/admin-your-random-path
+```
+
+如果使用默认路径，则是 `https://example.com/admin`。登录密码为 `GUIDENG_ADMIN_PASSWORD`；如果没有手动设置，请从服务端日志中复制自动生成的管理密码。
+
+管理后台支持中文和英文，点击右上角 `English` / `中文` 按钮即可切换，也可以访问：
+
+```text
+https://example.com/admin-your-random-path?lang=zh
+https://example.com/admin-your-random-path?lang=en
+```
+
+管理后台可以查看客户端、删除位置记录、删除客户端、手动清理未更新客户端，以及设置自动清理天数。自动清理设置中留空保存表示关闭自动清理。
+
+## 11. 常用维护命令
 
 查看日志：
 
@@ -302,10 +343,11 @@ docker run --rm -v guideng_guideng-data:/data -v "$PWD":/backup alpine tar czf /
 docker compose down
 ```
 
-## 11. 安全提示
+## 12. 安全提示
 
 - 不要使用空 Token 作为长期配置；如果留空，请从日志中复制自动生成的 Token。
 - 不要把 Token 发给不需要访问位置数据的人。
+- 为管理后台设置强密码，并把 `GUIDENG_ADMIN_PATH` 改成不容易猜到的路径。
 - 建议只开放 Nginx 的 `80` 和 `443` 端口，对外不要直接开放 `8080`。
 - 建议定期备份 SQLite 数据库。
 - 如果设备无法获取定位权限，优先检查是否使用 HTTPS。

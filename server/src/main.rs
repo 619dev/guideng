@@ -109,27 +109,44 @@ struct TrackQuery {
 #[derive(Debug, Deserialize)]
 struct AdminQuery {
     message: Option<String>,
+    msg: Option<String>,
+    count: Option<usize>,
+    lang: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct AdminLoginForm {
     password: String,
+    lang: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct DaysForm {
     days: i64,
+    lang: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct AutoCleanupForm {
     days: Option<i64>,
+    lang: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LangForm {
+    lang: Option<String>,
 }
 
 #[derive(Debug)]
 struct AdminDevice {
     device: Device,
     location_count: i64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AdminLang {
+    Zh,
+    En,
 }
 
 #[tokio::main]
@@ -487,29 +504,43 @@ async fn admin_index(
     headers: HeaderMap,
     Query(query): Query<AdminQuery>,
 ) -> Result<Response, ApiError> {
+    let lang = AdminLang::from_option(query.lang.as_deref());
     if !is_admin_authenticated(&state, &headers) {
-        return Ok(Redirect::to(&admin_url(&state, "/login")).into_response());
+        return Ok(
+            Redirect::to(&admin_url(&state, &format!("/login?lang={}", lang.code())))
+                .into_response(),
+        );
     }
 
     let devices = state.store.list_admin_devices()?;
     let auto_cleanup_days = state.store.auto_cleanup_days()?;
+    let message = admin_notice(&query, lang);
     Ok(Html(render_admin_page(
         &state,
         &devices,
         auto_cleanup_days,
-        query.message.as_deref(),
+        message.as_deref(),
+        lang,
     ))
     .into_response())
 }
 
-async fn admin_login_page(State(state): State<AppState>) -> Html<String> {
-    Html(render_login_page(&state, None))
+async fn admin_login_page(
+    State(state): State<AppState>,
+    Query(query): Query<AdminQuery>,
+) -> Html<String> {
+    Html(render_login_page(
+        &state,
+        None,
+        AdminLang::from_option(query.lang.as_deref()),
+    ))
 }
 
 async fn admin_login(
     State(state): State<AppState>,
     Form(payload): Form<AdminLoginForm>,
 ) -> Result<Response, ApiError> {
+    let lang = AdminLang::from_option(payload.lang.as_deref());
     if payload.password == *state.admin_password {
         let cookie = format!(
             "{ADMIN_SESSION_COOKIE}={}; HttpOnly; SameSite=Lax; Path={}; Max-Age=2592000",
@@ -518,26 +549,27 @@ async fn admin_login(
         );
         return Ok((
             [(header::SET_COOKIE, cookie)],
-            Redirect::to(state.admin_path.as_str()),
+            Redirect::to(&admin_url(&state, &format!("?lang={}", lang.code()))),
         )
             .into_response());
     }
 
     Ok((
         StatusCode::UNAUTHORIZED,
-        Html(render_login_page(&state, Some("密码不正确"))),
+        Html(render_login_page(&state, Some(lang.login_error()), lang)),
     )
         .into_response())
 }
 
-async fn admin_logout(State(state): State<AppState>) -> Response {
+async fn admin_logout(State(state): State<AppState>, Form(payload): Form<LangForm>) -> Response {
+    let lang = AdminLang::from_option(payload.lang.as_deref());
     let cookie = format!(
         "{ADMIN_SESSION_COOKIE}=; HttpOnly; SameSite=Lax; Path={}; Max-Age=0",
         state.admin_path.as_str()
     );
     (
         [(header::SET_COOKIE, cookie)],
-        Redirect::to(&admin_url(&state, "/login")),
+        Redirect::to(&admin_url(&state, &format!("/login?lang={}", lang.code()))),
     )
         .into_response()
 }
@@ -546,12 +578,15 @@ async fn admin_delete_locations(
     State(state): State<AppState>,
     headers: HeaderMap,
     AxumPath(id): AxumPath<Uuid>,
+    Form(payload): Form<LangForm>,
 ) -> Result<Response, ApiError> {
     require_admin(&state, &headers)?;
     let deleted = state.store.delete_device_locations(id)?;
-    Ok(Redirect::to(&admin_url(
+    Ok(Redirect::to(&admin_notice_url(
         &state,
-        &format!("/?message={deleted}%20location%20records%20deleted"),
+        AdminLang::from_option(payload.lang.as_deref()),
+        "location_records_deleted",
+        Some(deleted),
     ))
     .into_response())
 }
@@ -560,10 +595,17 @@ async fn admin_delete_device(
     State(state): State<AppState>,
     headers: HeaderMap,
     AxumPath(id): AxumPath<Uuid>,
+    Form(payload): Form<LangForm>,
 ) -> Result<Response, ApiError> {
     require_admin(&state, &headers)?;
     state.store.delete_device(id)?;
-    Ok(Redirect::to(&admin_url(&state, "/?message=device%20deleted")).into_response())
+    Ok(Redirect::to(&admin_notice_url(
+        &state,
+        AdminLang::from_option(payload.lang.as_deref()),
+        "device_deleted",
+        None,
+    ))
+    .into_response())
 }
 
 async fn admin_delete_stale(
@@ -572,11 +614,14 @@ async fn admin_delete_stale(
     Form(payload): Form<DaysForm>,
 ) -> Result<Response, ApiError> {
     require_admin(&state, &headers)?;
+    let lang = AdminLang::from_option(payload.lang.as_deref());
     let days = validate_days(payload.days)?;
     let deleted = state.store.delete_stale_devices(days)?;
-    Ok(Redirect::to(&admin_url(
+    Ok(Redirect::to(&admin_notice_url(
         &state,
-        &format!("/?message={deleted}%20stale%20devices%20deleted"),
+        lang,
+        "stale_devices_deleted",
+        Some(deleted),
     ))
     .into_response())
 }
@@ -587,6 +632,7 @@ async fn admin_set_auto_cleanup(
     Form(payload): Form<AutoCleanupForm>,
 ) -> Result<Response, ApiError> {
     require_admin(&state, &headers)?;
+    let lang = AdminLang::from_option(payload.lang.as_deref());
     let days = match payload.days {
         Some(days) if days > 0 => Some(validate_days(days)?),
         _ => None,
@@ -594,13 +640,21 @@ async fn admin_set_auto_cleanup(
     state.store.set_auto_cleanup_days(days)?;
     if let Some(days) = days {
         let deleted = state.store.delete_stale_devices(days)?;
-        Ok(Redirect::to(&admin_url(
+        Ok(Redirect::to(&admin_notice_url(
             &state,
-            &format!("/?message=auto%20cleanup%20saved,%20{deleted}%20devices%20deleted"),
+            lang,
+            "auto_cleanup_saved",
+            Some(deleted),
         ))
         .into_response())
     } else {
-        Ok(Redirect::to(&admin_url(&state, "/?message=auto%20cleanup%20disabled")).into_response())
+        Ok(Redirect::to(&admin_notice_url(
+            &state,
+            lang,
+            "auto_cleanup_disabled",
+            None,
+        ))
+        .into_response())
     }
 }
 
@@ -630,8 +684,231 @@ fn cookie_value<'a>(cookies: &'a str, name: &str) -> Option<&'a str> {
 fn admin_url(state: &AppState, suffix: &str) -> String {
     if suffix.is_empty() || suffix == "/" {
         state.admin_path.as_str().to_string()
-    } else {
+    } else if suffix.starts_with('/') || suffix.starts_with('?') {
         format!("{}{}", state.admin_path, suffix)
+    } else {
+        format!("{}/{}", state.admin_path, suffix)
+    }
+}
+
+fn admin_notice_url(
+    state: &AppState,
+    lang: AdminLang,
+    message: &str,
+    count: Option<usize>,
+) -> String {
+    let mut suffix = format!("?lang={}&msg={message}", lang.code());
+    if let Some(count) = count {
+        suffix.push_str(&format!("&count={count}"));
+    }
+    admin_url(state, &suffix)
+}
+
+fn admin_notice(query: &AdminQuery, lang: AdminLang) -> Option<String> {
+    if let Some(message) = query.message.as_deref() {
+        return Some(message.to_string());
+    }
+
+    let count = query.count.unwrap_or_default();
+    query.msg.as_deref().map(|message| match (lang, message) {
+        (AdminLang::Zh, "location_records_deleted") => format!("{count} 条位置记录已删除"),
+        (AdminLang::En, "location_records_deleted") => format!("{count} location records deleted"),
+        (AdminLang::Zh, "device_deleted") => "客户端已删除".to_string(),
+        (AdminLang::En, "device_deleted") => "Device deleted".to_string(),
+        (AdminLang::Zh, "stale_devices_deleted") => format!("{count} 个未更新客户端已删除"),
+        (AdminLang::En, "stale_devices_deleted") => format!("{count} stale devices deleted"),
+        (AdminLang::Zh, "auto_cleanup_saved") => {
+            format!("自动清理设置已保存，已删除 {count} 个客户端")
+        }
+        (AdminLang::En, "auto_cleanup_saved") => {
+            format!("Auto cleanup saved, {count} devices deleted")
+        }
+        (AdminLang::Zh, "auto_cleanup_disabled") => "自动清理已关闭".to_string(),
+        (AdminLang::En, "auto_cleanup_disabled") => "Auto cleanup disabled".to_string(),
+        (_, fallback) => fallback.to_string(),
+    })
+}
+
+fn hidden_lang_input(lang: AdminLang) -> String {
+    format!(
+        r#"<input type="hidden" name="lang" value="{}">"#,
+        lang.code()
+    )
+}
+
+impl AdminLang {
+    fn from_option(value: Option<&str>) -> Self {
+        match value {
+            Some("en") => Self::En,
+            _ => Self::Zh,
+        }
+    }
+
+    fn code(self) -> &'static str {
+        match self {
+            Self::Zh => "zh",
+            Self::En => "en",
+        }
+    }
+
+    fn html_lang(self) -> &'static str {
+        match self {
+            Self::Zh => "zh-CN",
+            Self::En => "en",
+        }
+    }
+
+    fn title(self) -> &'static str {
+        match self {
+            Self::Zh => "Guideng 管理后台",
+            Self::En => "Guideng Admin",
+        }
+    }
+
+    fn switch_label(self) -> &'static str {
+        match self {
+            Self::Zh => "English",
+            Self::En => "中文",
+        }
+    }
+
+    fn switch_code(self) -> &'static str {
+        match self {
+            Self::Zh => "en",
+            Self::En => "zh",
+        }
+    }
+
+    fn password_label(self) -> &'static str {
+        match self {
+            Self::Zh => "管理密码",
+            Self::En => "Admin password",
+        }
+    }
+
+    fn login(self) -> &'static str {
+        match self {
+            Self::Zh => "登录",
+            Self::En => "Log in",
+        }
+    }
+
+    fn login_error(self) -> &'static str {
+        match self {
+            Self::Zh => "密码不正确",
+            Self::En => "Incorrect password",
+        }
+    }
+
+    fn logout(self) -> &'static str {
+        match self {
+            Self::Zh => "退出",
+            Self::En => "Log out",
+        }
+    }
+
+    fn devices(self) -> &'static str {
+        match self {
+            Self::Zh => "客户端",
+            Self::En => "Devices",
+        }
+    }
+
+    fn empty_devices(self) -> &'static str {
+        match self {
+            Self::Zh => "暂无客户端",
+            Self::En => "No devices",
+        }
+    }
+
+    fn manual_cleanup(self) -> &'static str {
+        match self {
+            Self::Zh => "手动清理未更新客户端",
+            Self::En => "Manual cleanup of inactive devices",
+        }
+    }
+
+    fn auto_cleanup(self) -> &'static str {
+        match self {
+            Self::Zh => "自动清理设置",
+            Self::En => "Auto cleanup settings",
+        }
+    }
+
+    fn days(self) -> &'static str {
+        match self {
+            Self::Zh => "天数",
+            Self::En => "Days",
+        }
+    }
+
+    fn delete_now(self) -> &'static str {
+        match self {
+            Self::Zh => "立即删除",
+            Self::En => "Delete now",
+        }
+    }
+
+    fn save_settings(self) -> &'static str {
+        match self {
+            Self::Zh => "保存设置",
+            Self::En => "Save settings",
+        }
+    }
+
+    fn empty_to_disable(self) -> &'static str {
+        match self {
+            Self::Zh => "留空关闭",
+            Self::En => "Leave empty to disable",
+        }
+    }
+
+    fn auto_status(self, days: Option<i64>) -> String {
+        match (self, days) {
+            (Self::Zh, Some(days)) => format!("当前：自动删除超过 {days} 天未更新位置的客户端"),
+            (Self::En, Some(days)) => {
+                format!("Current: automatically delete devices inactive for over {days} days")
+            }
+            (Self::Zh, None) => "当前：未开启自动清理".to_string(),
+            (Self::En, None) => "Current: auto cleanup is disabled".to_string(),
+        }
+    }
+
+    fn table_headers(self) -> [&'static str; 7] {
+        match self {
+            Self::Zh => [
+                "名称",
+                "平台",
+                "最后更新",
+                "最后位置",
+                "位置记录",
+                "创建时间",
+                "操作",
+            ],
+            Self::En => [
+                "Name",
+                "Platform",
+                "Last update",
+                "Last location",
+                "Location records",
+                "Created",
+                "Actions",
+            ],
+        }
+    }
+
+    fn delete_locations(self) -> &'static str {
+        match self {
+            Self::Zh => "删除位置",
+            Self::En => "Delete locations",
+        }
+    }
+
+    fn delete_device(self) -> &'static str {
+        match self {
+            Self::Zh => "删除客户端",
+            Self::En => "Delete device",
+        }
     }
 }
 
@@ -642,33 +919,44 @@ fn validate_days(days: i64) -> Result<i64, ApiError> {
     Ok(days)
 }
 
-fn render_login_page(state: &AppState, error: Option<&str>) -> String {
+fn render_login_page(state: &AppState, error: Option<&str>, lang: AdminLang) -> String {
     let error_html = error
         .map(|message| format!(r#"<p class="error">{}</p>"#, escape_html(message)))
         .unwrap_or_default();
+    let switch_url = admin_url(state, &format!("/login?lang={}", lang.switch_code()));
     format!(
         r#"<!doctype html>
-<html lang="zh-CN">
+<html lang="{}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Guideng 管理后台</title>
+  <title>{}</title>
   <style>{}</style>
 </head>
 <body>
   <main class="login">
-    <h1>Guideng 管理后台</h1>
+    <div class="login-tools"><a class="button secondary" href="{}">{}</a></div>
+    <h1>{}</h1>
     <form method="post" action="{}/login">
-      <label>管理密码<input name="password" type="password" autocomplete="current-password" autofocus required></label>
       {}
-      <button type="submit">登录</button>
+      <label>{}<input name="password" type="password" autocomplete="current-password" autofocus required></label>
+      {}
+      <button type="submit">{}</button>
     </form>
   </main>
 </body>
 </html>"#,
+        lang.html_lang(),
+        lang.title(),
         admin_css(),
+        switch_url,
+        lang.switch_label(),
+        lang.title(),
         state.admin_path,
-        error_html
+        hidden_lang_input(lang),
+        lang.password_label(),
+        error_html,
+        lang.login()
     )
 }
 
@@ -677,51 +965,64 @@ fn render_admin_page(
     devices: &[AdminDevice],
     auto_cleanup_days: Option<i64>,
     message: Option<&str>,
+    lang: AdminLang,
 ) -> String {
     let rows = if devices.is_empty() {
-        r#"<tr><td colspan="7" class="muted">暂无客户端</td></tr>"#.to_string()
+        format!(
+            r#"<tr><td colspan="7" class="muted">{}</td></tr>"#,
+            lang.empty_devices()
+        )
     } else {
         devices
             .iter()
-            .map(|entry| render_admin_device_row(state, entry))
+            .map(|entry| render_admin_device_row(state, entry, lang))
             .collect::<Vec<_>>()
             .join("")
     };
     let auto_days_value = auto_cleanup_days
         .map(|days| days.to_string())
         .unwrap_or_default();
-    let status = auto_cleanup_days
-        .map(|days| format!("当前：自动删除超过 {days} 天未更新位置的客户端"))
-        .unwrap_or_else(|| "当前：未开启自动清理".to_string());
+    let status = lang.auto_status(auto_cleanup_days);
     let message_html = message
         .map(|value| format!(r#"<p class="notice">{}</p>"#, escape_html(value)))
         .unwrap_or_default();
+    let switch_url = admin_url(state, &format!("?lang={}", lang.switch_code()));
+    let headers = lang.table_headers();
+    let header_html = headers
+        .iter()
+        .map(|header| format!("<th>{}</th>", escape_html(header)))
+        .collect::<Vec<_>>()
+        .join("");
+    let hidden_lang = hidden_lang_input(lang);
 
     format!(
         r#"<!doctype html>
-<html lang="zh-CN">
+<html lang="{}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Guideng 管理后台</title>
+  <title>{}</title>
   <style>{}</style>
 </head>
 <body>
   <main>
     <header>
       <div>
-        <h1>Guideng 管理后台</h1>
+        <h1>{}</h1>
         <p>{}</p>
       </div>
-      <form method="post" action="{}/logout"><button type="submit" class="secondary">退出</button></form>
+      <div class="header-actions">
+        <a class="button secondary" href="{}">{}</a>
+        <form method="post" action="{}/logout">{}<button type="submit" class="secondary">{}</button></form>
+      </div>
     </header>
     {}
     <section>
-      <h2>客户端</h2>
+      <h2>{}</h2>
       <div class="table-wrap">
         <table>
           <thead>
-            <tr><th>名称</th><th>平台</th><th>最后更新</th><th>最后位置</th><th>位置记录</th><th>创建时间</th><th>操作</th></tr>
+            <tr>{}</tr>
           </thead>
           <tbody>{}</tbody>
         </table>
@@ -729,33 +1030,53 @@ fn render_admin_page(
     </section>
     <section class="grid">
       <form method="post" action="{}/stale/delete">
-        <h2>手动清理未更新客户端</h2>
-        <label>天数<input name="days" type="number" min="1" max="36500" value="30" required></label>
-        <button type="submit">立即删除</button>
+        {}
+        <h2>{}</h2>
+        <label>{}<input name="days" type="number" min="1" max="36500" value="30" required></label>
+        <button type="submit">{}</button>
       </form>
       <form method="post" action="{}/auto-cleanup">
-        <h2>自动清理设置</h2>
+        {}
+        <h2>{}</h2>
         <p class="muted">{}</p>
-        <label>天数<input name="days" type="number" min="1" max="36500" value="{}" placeholder="留空关闭"></label>
-        <button type="submit">保存设置</button>
+        <label>{}<input name="days" type="number" min="1" max="36500" value="{}" placeholder="{}"></label>
+        <button type="submit">{}</button>
       </form>
     </section>
   </main>
 </body>
 </html>"#,
+        lang.html_lang(),
+        lang.title(),
         admin_css(),
+        lang.title(),
         escape_html(&status),
+        switch_url,
+        lang.switch_label(),
         state.admin_path,
+        hidden_lang,
+        lang.logout(),
         message_html,
+        lang.devices(),
+        header_html,
         rows,
         state.admin_path,
+        hidden_lang_input(lang),
+        lang.manual_cleanup(),
+        lang.days(),
+        lang.delete_now(),
         state.admin_path,
+        hidden_lang_input(lang),
+        lang.auto_cleanup(),
         escape_html(&status),
-        auto_days_value
+        lang.days(),
+        auto_days_value,
+        lang.empty_to_disable(),
+        lang.save_settings()
     )
 }
 
-fn render_admin_device_row(state: &AppState, entry: &AdminDevice) -> String {
+fn render_admin_device_row(state: &AppState, entry: &AdminDevice, lang: AdminLang) -> String {
     let device = &entry.device;
     let last_location = device
         .last_location
@@ -771,8 +1092,8 @@ fn render_admin_device_row(state: &AppState, entry: &AdminDevice) -> String {
   <td>{}</td>
   <td>{}</td>
   <td class="actions">
-    <form method="post" action="{}/devices/{}/locations/delete"><button type="submit" class="secondary">删除位置</button></form>
-    <form method="post" action="{}/devices/{}/delete"><button type="submit" class="danger">删除客户端</button></form>
+    <form method="post" action="{}/devices/{}/locations/delete">{}<button type="submit" class="secondary">{}</button></form>
+    <form method="post" action="{}/devices/{}/delete">{}<button type="submit" class="danger">{}</button></form>
   </td>
 </tr>"#,
         escape_html(&device.name),
@@ -784,8 +1105,12 @@ fn render_admin_device_row(state: &AppState, entry: &AdminDevice) -> String {
         escape_html(&time_to_text(device.created_at)),
         state.admin_path,
         device.id,
+        hidden_lang_input(lang),
+        lang.delete_locations(),
         state.admin_path,
-        device.id
+        device.id,
+        hidden_lang_input(lang),
+        lang.delete_device()
     )
 }
 
@@ -800,11 +1125,14 @@ h2{font-size:18px;margin:0 0 14px}
 p{margin:0;color:#5e6a76}
 section,form.login{background:#fff;border:1px solid #dfe4ea;border-radius:8px;padding:18px;margin-bottom:18px}
 .login form,.grid form{background:#fff;border:1px solid #dfe4ea;border-radius:8px;padding:18px}
+.login-tools{display:flex;justify-content:flex-end;margin-bottom:14px}
+.header-actions{display:flex;align-items:center;gap:8px}
+.header-actions form{margin:0}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;background:transparent;border:0;padding:0}
 label{display:grid;gap:8px;margin-bottom:14px;font-weight:600}
 input{box-sizing:border-box;width:100%;border:1px solid #c9d1d9;border-radius:6px;padding:10px;font:inherit}
-button{border:0;border-radius:6px;background:#1f6feb;color:#fff;padding:9px 14px;font:inherit;font-weight:700;cursor:pointer}
-button.secondary{background:#eef2f6;color:#17202a}
+a.button,button{border:0;border-radius:6px;background:#1f6feb;color:#fff;padding:9px 14px;font:inherit;font-weight:700;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;justify-content:center}
+a.button.secondary,button.secondary{background:#eef2f6;color:#17202a}
 button.danger{background:#c93c37}
 .table-wrap{overflow:auto}
 table{border-collapse:collapse;width:100%;min-width:900px}
@@ -815,7 +1143,7 @@ th{font-size:13px;color:#5e6a76;background:#fbfcfd}
 .muted{color:#6b7785}
 .error{color:#b42318;margin-bottom:14px}
 .notice{background:#e8f3ff;border:1px solid #b9d9ff;border-radius:6px;color:#174a7c;margin-bottom:16px;padding:10px}
-@media (max-width:700px){main{padding:18px}header{align-items:flex-start;flex-direction:column}.actions{flex-direction:column}}
+@media (max-width:700px){main{padding:18px}header{align-items:flex-start;flex-direction:column}.header-actions{width:100%;justify-content:space-between}.actions{flex-direction:column}}
 "#
 }
 
@@ -1325,5 +1653,79 @@ impl From<rusqlite::Error> for ApiError {
 impl From<std::io::Error> for ApiError {
     fn from(error: std::io::Error) -> Self {
         anyhow::Error::from(error).into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_state(admin_path: &str) -> AppState {
+        let db_path = std::env::temp_dir().join(format!("guideng-test-{}.sqlite3", Uuid::new_v4()));
+        AppState {
+            token: Arc::new("test-token".to_string()),
+            admin_password: Arc::new("test-password".to_string()),
+            admin_path: Arc::new(admin_path.to_string()),
+            admin_session: Arc::new("test-session".to_string()),
+            store: Store::open(db_path).expect("test database should open"),
+            map_config: MapConfig {
+                provider: "amap",
+                amap_web_js_api_key: None,
+                amap_web_js_security_code: None,
+                amap_android_key: None,
+                amap_ios_key: None,
+            },
+        }
+    }
+
+    #[test]
+    fn admin_url_keeps_query_on_admin_path() {
+        let state = test_state("/adminfm6190123onwf");
+
+        assert_eq!(
+            admin_url(&state, "?message=auto%20cleanup%20saved"),
+            "/adminfm6190123onwf?message=auto%20cleanup%20saved"
+        );
+    }
+
+    #[test]
+    fn admin_url_keeps_child_paths_under_admin_path() {
+        let state = test_state("/adminfm6190123onwf");
+
+        assert_eq!(admin_url(&state, "/login"), "/adminfm6190123onwf/login");
+        assert_eq!(admin_url(&state, "login"), "/adminfm6190123onwf/login");
+    }
+
+    #[test]
+    fn admin_notice_url_keeps_language_and_count() {
+        let state = test_state("/adminfm6190123onwf");
+
+        assert_eq!(
+            admin_notice_url(&state, AdminLang::En, "stale_devices_deleted", Some(3)),
+            "/adminfm6190123onwf?lang=en&msg=stale_devices_deleted&count=3"
+        );
+    }
+
+    #[test]
+    fn render_admin_page_uses_english_labels_and_keeps_language_in_forms() {
+        let state = test_state("/adminfm6190123onwf");
+        let html = render_admin_page(&state, &[], None, None, AdminLang::En);
+
+        assert!(html.contains("<title>Guideng Admin</title>"));
+        assert!(html.contains("Manual cleanup of inactive devices"));
+        assert!(html.contains("Auto cleanup settings"));
+        assert!(html.contains(r#"name="lang" value="en""#));
+        assert!(html.contains(r#"href="/adminfm6190123onwf?lang=zh""#));
+    }
+
+    #[test]
+    fn render_login_page_uses_english_labels() {
+        let state = test_state("/adminfm6190123onwf");
+        let html = render_login_page(&state, Some(AdminLang::En.login_error()), AdminLang::En);
+
+        assert!(html.contains("Admin password"));
+        assert!(html.contains("Incorrect password"));
+        assert!(html.contains(r#"href="/adminfm6190123onwf/login?lang=zh""#));
+        assert!(html.contains(r#"name="lang" value="en""#));
     }
 }
