@@ -14,6 +14,15 @@ spec:
       type: PASSWORD
       name: Shared Token
       description: Shared token for all Guideng clients. Leave empty to let the server generate one on startup.
+    - key: GUIDENG_ADMIN_PASSWORD
+      type: PASSWORD
+      name: Admin Password
+      description: Password for the Guideng admin console. Leave empty to let the server generate one on startup.
+    - key: GUIDENG_ADMIN_PATH
+      type: STRING
+      name: Admin Path
+      description: URL path for the Guideng admin console.
+      default: /admin
     - key: GUIDENG_AMAP_WEB_JS_API_KEY
       type: STRING
       name: AMap Web JS API Key
@@ -40,7 +49,7 @@ spec:
     - `server`: Rust API server, SQLite storage, latest 7 days of tracks.
     - `client`: React web client.
 
-    If `GUIDENG_TOKEN` is empty, the server generates a 128-character random token and writes it to `/data/guideng.log`.
+    If `GUIDENG_TOKEN` or `GUIDENG_ADMIN_PASSWORD` is empty, the server generates a 128-character random value and writes it to `/data/guideng.log`.
   services:
     - name: server
       icon: https://raw.githubusercontent.com/619dev/guideng/main/client/public/assets/guideng-logo.png
@@ -63,6 +72,10 @@ spec:
             default: "*"
           GUIDENG_TOKEN:
             default: ${GUIDENG_TOKEN}
+          GUIDENG_ADMIN_PASSWORD:
+            default: ${GUIDENG_ADMIN_PASSWORD}
+          GUIDENG_ADMIN_PATH:
+            default: ${GUIDENG_ADMIN_PATH}
           GUIDENG_AMAP_WEB_JS_API_KEY:
             default: ${GUIDENG_AMAP_WEB_JS_API_KEY}
           GUIDENG_AMAP_WEB_JS_SECURITY_CODE:

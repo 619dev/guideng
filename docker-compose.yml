@@ -4,6 +4,8 @@ services:
     pull_policy: always
     environment:
       GUIDENG_TOKEN: ${GUIDENG_TOKEN:-}
+      GUIDENG_ADMIN_PASSWORD: ${GUIDENG_ADMIN_PASSWORD:-}
+      GUIDENG_ADMIN_PATH: ${GUIDENG_ADMIN_PATH:-/admin}
       GUIDENG_BIND: 0.0.0.0:8080
       GUIDENG_DATABASE_URL: /data/guideng.sqlite3
       GUIDENG_LOG_PATH: /data/guideng.log

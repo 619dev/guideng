@@ -7,15 +7,15 @@ use std::{
 
 use anyhow::{anyhow, Context, Result};
 use axum::{
-    extract::{Path as AxumPath, Query, State},
+    extract::{Form, Path as AxumPath, Query, State},
     http::{header, HeaderMap, HeaderValue, Method, StatusCode},
     middleware::{self, Next},
-    response::{IntoResponse, Response},
+    response::{Html, IntoResponse, Redirect, Response},
     routing::{get, patch, post},
     Json, Router,
 };
 use chrono::{DateTime, Duration, Utc};
-use rand::{rngs::OsRng, Rng};
+use rand::{rngs::OsRng, Rng, RngCore};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
@@ -25,10 +25,15 @@ use uuid::Uuid;
 const TOKEN_LEN: usize = 128;
 const TOKEN_CHARS: &[u8] =
     b"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!@#$%^&*()-_=+[]{}:,.?/";
+const ADMIN_SESSION_COOKIE: &str = "guideng_admin_session";
+const AUTO_CLEANUP_DAYS_KEY: &str = "admin.auto_cleanup_days";
 
 #[derive(Clone)]
 struct AppState {
     token: Arc<String>,
+    admin_password: Arc<String>,
+    admin_path: Arc<String>,
+    admin_session: Arc<String>,
     store: Store,
     map_config: MapConfig,
 }
@@ -101,11 +106,42 @@ struct TrackQuery {
     days: Option<i64>,
 }
 
+#[derive(Debug, Deserialize)]
+struct AdminQuery {
+    message: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AdminLoginForm {
+    password: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct DaysForm {
+    days: i64,
+}
+
+#[derive(Debug, Deserialize)]
+struct AutoCleanupForm {
+    days: Option<i64>,
+}
+
+#[derive(Debug)]
+struct AdminDevice {
+    device: Device,
+    location_count: i64,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let _log_guard = setup_logging()?;
 
     let token = load_or_generate_token();
+    let admin_password = load_or_generate_admin_password();
+    let admin_path = normalize_admin_path(
+        env::var("GUIDENG_ADMIN_PATH").unwrap_or_else(|_| "/admin".to_string()),
+    )?;
+    let admin_session = generate_session_secret();
     let bind = env::var("GUIDENG_BIND").unwrap_or_else(|_| "0.0.0.0:8080".to_string());
     let database_url =
         env::var("GUIDENG_DATABASE_URL").unwrap_or_else(|_| "/data/guideng.sqlite3".to_string());
@@ -121,10 +157,24 @@ async fn main() -> Result<()> {
     } else {
         tracing::warn!("GUIDENG_TOKEN was not set; generated startup token: {token}");
     }
+    if env::var("GUIDENG_ADMIN_PASSWORD")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .is_some()
+    {
+        tracing::info!("using GUIDENG_ADMIN_PASSWORD from environment");
+    } else {
+        tracing::warn!(
+            "GUIDENG_ADMIN_PASSWORD was not set; generated startup admin password: {admin_password}"
+        );
+    }
 
     let store = Store::open(PathBuf::from(database_url))?;
     let state = AppState {
         token: Arc::new(token),
+        admin_password: Arc::new(admin_password),
+        admin_path: Arc::new(admin_path),
+        admin_session: Arc::new(admin_session),
         store,
         map_config,
     };
@@ -137,9 +187,25 @@ async fn main() -> Result<()> {
         .route("/devices/:id/tracks", get(list_tracks))
         .route_layer(middleware::from_fn_with_state(state.clone(), auth));
 
+    let admin = Router::new()
+        .route("/", get(admin_index))
+        .route("/login", get(admin_login_page).post(admin_login))
+        .route("/logout", post(admin_logout))
+        .route(
+            "/devices/:id/locations/delete",
+            post(admin_delete_locations),
+        )
+        .route("/devices/:id/delete", post(admin_delete_device))
+        .route("/stale/delete", post(admin_delete_stale))
+        .route("/auto-cleanup", post(admin_set_auto_cleanup));
+
+    spawn_auto_cleanup(state.clone());
+
+    let admin_path = state.admin_path.as_str().to_string();
     let app = Router::new()
         .route("/health", get(health))
         .nest("/api", api)
+        .nest(&admin_path, admin)
         .layer(cors_layer(&cors_origins)?)
         .layer(TraceLayer::new_for_http())
         .with_state(state);
@@ -215,6 +281,14 @@ fn load_or_generate_token() -> String {
         .unwrap_or_else(generate_token)
 }
 
+fn load_or_generate_admin_password() -> String {
+    env::var("GUIDENG_ADMIN_PASSWORD")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(generate_token)
+}
+
 fn generate_token() -> String {
     let mut rng = OsRng;
     (0..TOKEN_LEN)
@@ -223,6 +297,42 @@ fn generate_token() -> String {
             TOKEN_CHARS[index] as char
         })
         .collect()
+}
+
+fn generate_session_secret() -> String {
+    let mut bytes = [0_u8; 32];
+    OsRng.fill_bytes(&mut bytes);
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn normalize_admin_path(path: String) -> Result<String> {
+    let path = path.trim();
+    if path.is_empty() {
+        return Ok("/admin".to_string());
+    }
+    if path.contains(['?', '#'])
+        || path.split('/').any(|part| part == "." || part == "..")
+        || !path
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '/' | '-' | '_' | '.' | '~'))
+    {
+        return Err(anyhow!("invalid GUIDENG_ADMIN_PATH"));
+    }
+
+    let mut normalized = if path.starts_with('/') {
+        path.to_string()
+    } else {
+        format!("/{path}")
+    };
+    while normalized.len() > 1 && normalized.ends_with('/') {
+        normalized.pop();
+    }
+    if normalized == "/" || normalized == "/api" || normalized == "/health" {
+        return Err(anyhow!(
+            "GUIDENG_ADMIN_PATH conflicts with a reserved route"
+        ));
+    }
+    Ok(normalized)
 }
 
 impl MapConfig {
@@ -359,6 +469,7 @@ async fn update_location(
         received_at: Utc::now(),
     };
     let device = state.store.insert_location(id, location)?;
+    run_auto_cleanup(&state);
     Ok(Json(device))
 }
 
@@ -369,6 +480,377 @@ async fn list_tracks(
 ) -> Result<Json<Vec<Location>>, ApiError> {
     let days = query.days.unwrap_or(7).clamp(1, 7);
     Ok(Json(state.store.list_tracks(id, days)?))
+}
+
+async fn admin_index(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<AdminQuery>,
+) -> Result<Response, ApiError> {
+    if !is_admin_authenticated(&state, &headers) {
+        return Ok(Redirect::to(&admin_url(&state, "/login")).into_response());
+    }
+
+    let devices = state.store.list_admin_devices()?;
+    let auto_cleanup_days = state.store.auto_cleanup_days()?;
+    Ok(Html(render_admin_page(
+        &state,
+        &devices,
+        auto_cleanup_days,
+        query.message.as_deref(),
+    ))
+    .into_response())
+}
+
+async fn admin_login_page(State(state): State<AppState>) -> Html<String> {
+    Html(render_login_page(&state, None))
+}
+
+async fn admin_login(
+    State(state): State<AppState>,
+    Form(payload): Form<AdminLoginForm>,
+) -> Result<Response, ApiError> {
+    if payload.password == *state.admin_password {
+        let cookie = format!(
+            "{ADMIN_SESSION_COOKIE}={}; HttpOnly; SameSite=Lax; Path={}; Max-Age=2592000",
+            state.admin_session,
+            state.admin_path.as_str()
+        );
+        return Ok((
+            [(header::SET_COOKIE, cookie)],
+            Redirect::to(state.admin_path.as_str()),
+        )
+            .into_response());
+    }
+
+    Ok((
+        StatusCode::UNAUTHORIZED,
+        Html(render_login_page(&state, Some("密码不正确"))),
+    )
+        .into_response())
+}
+
+async fn admin_logout(State(state): State<AppState>) -> Response {
+    let cookie = format!(
+        "{ADMIN_SESSION_COOKIE}=; HttpOnly; SameSite=Lax; Path={}; Max-Age=0",
+        state.admin_path.as_str()
+    );
+    (
+        [(header::SET_COOKIE, cookie)],
+        Redirect::to(&admin_url(&state, "/login")),
+    )
+        .into_response()
+}
+
+async fn admin_delete_locations(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumPath(id): AxumPath<Uuid>,
+) -> Result<Response, ApiError> {
+    require_admin(&state, &headers)?;
+    let deleted = state.store.delete_device_locations(id)?;
+    Ok(Redirect::to(&admin_url(
+        &state,
+        &format!("/?message={deleted}%20location%20records%20deleted"),
+    ))
+    .into_response())
+}
+
+async fn admin_delete_device(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumPath(id): AxumPath<Uuid>,
+) -> Result<Response, ApiError> {
+    require_admin(&state, &headers)?;
+    state.store.delete_device(id)?;
+    Ok(Redirect::to(&admin_url(&state, "/?message=device%20deleted")).into_response())
+}
+
+async fn admin_delete_stale(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Form(payload): Form<DaysForm>,
+) -> Result<Response, ApiError> {
+    require_admin(&state, &headers)?;
+    let days = validate_days(payload.days)?;
+    let deleted = state.store.delete_stale_devices(days)?;
+    Ok(Redirect::to(&admin_url(
+        &state,
+        &format!("/?message={deleted}%20stale%20devices%20deleted"),
+    ))
+    .into_response())
+}
+
+async fn admin_set_auto_cleanup(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Form(payload): Form<AutoCleanupForm>,
+) -> Result<Response, ApiError> {
+    require_admin(&state, &headers)?;
+    let days = match payload.days {
+        Some(days) if days > 0 => Some(validate_days(days)?),
+        _ => None,
+    };
+    state.store.set_auto_cleanup_days(days)?;
+    if let Some(days) = days {
+        let deleted = state.store.delete_stale_devices(days)?;
+        Ok(Redirect::to(&admin_url(
+            &state,
+            &format!("/?message=auto%20cleanup%20saved,%20{deleted}%20devices%20deleted"),
+        ))
+        .into_response())
+    } else {
+        Ok(Redirect::to(&admin_url(&state, "/?message=auto%20cleanup%20disabled")).into_response())
+    }
+}
+
+fn is_admin_authenticated(state: &AppState, headers: &HeaderMap) -> bool {
+    headers
+        .get(header::COOKIE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| cookie_value(value, ADMIN_SESSION_COOKIE))
+        .is_some_and(|value| value == state.admin_session.as_str())
+}
+
+fn require_admin(state: &AppState, headers: &HeaderMap) -> Result<(), ApiError> {
+    if is_admin_authenticated(state, headers) {
+        Ok(())
+    } else {
+        Err(ApiError::unauthorized("admin login required"))
+    }
+}
+
+fn cookie_value<'a>(cookies: &'a str, name: &str) -> Option<&'a str> {
+    cookies.split(';').find_map(|part| {
+        let (key, value) = part.trim().split_once('=')?;
+        (key == name).then_some(value)
+    })
+}
+
+fn admin_url(state: &AppState, suffix: &str) -> String {
+    if suffix.is_empty() || suffix == "/" {
+        state.admin_path.as_str().to_string()
+    } else {
+        format!("{}{}", state.admin_path, suffix)
+    }
+}
+
+fn validate_days(days: i64) -> Result<i64, ApiError> {
+    if !(1..=36500).contains(&days) {
+        return Err(ApiError::bad_request("days must be between 1 and 36500"));
+    }
+    Ok(days)
+}
+
+fn render_login_page(state: &AppState, error: Option<&str>) -> String {
+    let error_html = error
+        .map(|message| format!(r#"<p class="error">{}</p>"#, escape_html(message)))
+        .unwrap_or_default();
+    format!(
+        r#"<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Guideng 管理后台</title>
+  <style>{}</style>
+</head>
+<body>
+  <main class="login">
+    <h1>Guideng 管理后台</h1>
+    <form method="post" action="{}/login">
+      <label>管理密码<input name="password" type="password" autocomplete="current-password" autofocus required></label>
+      {}
+      <button type="submit">登录</button>
+    </form>
+  </main>
+</body>
+</html>"#,
+        admin_css(),
+        state.admin_path,
+        error_html
+    )
+}
+
+fn render_admin_page(
+    state: &AppState,
+    devices: &[AdminDevice],
+    auto_cleanup_days: Option<i64>,
+    message: Option<&str>,
+) -> String {
+    let rows = if devices.is_empty() {
+        r#"<tr><td colspan="7" class="muted">暂无客户端</td></tr>"#.to_string()
+    } else {
+        devices
+            .iter()
+            .map(|entry| render_admin_device_row(state, entry))
+            .collect::<Vec<_>>()
+            .join("")
+    };
+    let auto_days_value = auto_cleanup_days
+        .map(|days| days.to_string())
+        .unwrap_or_default();
+    let status = auto_cleanup_days
+        .map(|days| format!("当前：自动删除超过 {days} 天未更新位置的客户端"))
+        .unwrap_or_else(|| "当前：未开启自动清理".to_string());
+    let message_html = message
+        .map(|value| format!(r#"<p class="notice">{}</p>"#, escape_html(value)))
+        .unwrap_or_default();
+
+    format!(
+        r#"<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Guideng 管理后台</title>
+  <style>{}</style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>Guideng 管理后台</h1>
+        <p>{}</p>
+      </div>
+      <form method="post" action="{}/logout"><button type="submit" class="secondary">退出</button></form>
+    </header>
+    {}
+    <section>
+      <h2>客户端</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>名称</th><th>平台</th><th>最后更新</th><th>最后位置</th><th>位置记录</th><th>创建时间</th><th>操作</th></tr>
+          </thead>
+          <tbody>{}</tbody>
+        </table>
+      </div>
+    </section>
+    <section class="grid">
+      <form method="post" action="{}/stale/delete">
+        <h2>手动清理未更新客户端</h2>
+        <label>天数<input name="days" type="number" min="1" max="36500" value="30" required></label>
+        <button type="submit">立即删除</button>
+      </form>
+      <form method="post" action="{}/auto-cleanup">
+        <h2>自动清理设置</h2>
+        <p class="muted">{}</p>
+        <label>天数<input name="days" type="number" min="1" max="36500" value="{}" placeholder="留空关闭"></label>
+        <button type="submit">保存设置</button>
+      </form>
+    </section>
+  </main>
+</body>
+</html>"#,
+        admin_css(),
+        escape_html(&status),
+        state.admin_path,
+        message_html,
+        rows,
+        state.admin_path,
+        state.admin_path,
+        escape_html(&status),
+        auto_days_value
+    )
+}
+
+fn render_admin_device_row(state: &AppState, entry: &AdminDevice) -> String {
+    let device = &entry.device;
+    let last_location = device
+        .last_location
+        .as_ref()
+        .map(|location| format!("{:.6}, {:.6}", location.latitude, location.longitude))
+        .unwrap_or_else(|| "-".to_string());
+    format!(
+        r#"<tr>
+  <td><strong>{}</strong><br><span class="muted">{}</span></td>
+  <td>{}</td>
+  <td>{}</td>
+  <td>{}</td>
+  <td>{}</td>
+  <td>{}</td>
+  <td class="actions">
+    <form method="post" action="{}/devices/{}/locations/delete"><button type="submit" class="secondary">删除位置</button></form>
+    <form method="post" action="{}/devices/{}/delete"><button type="submit" class="danger">删除客户端</button></form>
+  </td>
+</tr>"#,
+        escape_html(&device.name),
+        device.id,
+        escape_html(device.platform.as_deref().unwrap_or("-")),
+        escape_html(&time_to_text(device.updated_at)),
+        escape_html(&last_location),
+        entry.location_count,
+        escape_html(&time_to_text(device.created_at)),
+        state.admin_path,
+        device.id,
+        state.admin_path,
+        device.id
+    )
+}
+
+fn admin_css() -> &'static str {
+    r#"
+body{margin:0;background:#f6f7f9;color:#17202a;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+main{max-width:1180px;margin:0 auto;padding:28px}
+.login{max-width:420px;padding-top:12vh}
+header{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:20px}
+h1{font-size:28px;margin:0 0 4px}
+h2{font-size:18px;margin:0 0 14px}
+p{margin:0;color:#5e6a76}
+section,form.login{background:#fff;border:1px solid #dfe4ea;border-radius:8px;padding:18px;margin-bottom:18px}
+.login form,.grid form{background:#fff;border:1px solid #dfe4ea;border-radius:8px;padding:18px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;background:transparent;border:0;padding:0}
+label{display:grid;gap:8px;margin-bottom:14px;font-weight:600}
+input{box-sizing:border-box;width:100%;border:1px solid #c9d1d9;border-radius:6px;padding:10px;font:inherit}
+button{border:0;border-radius:6px;background:#1f6feb;color:#fff;padding:9px 14px;font:inherit;font-weight:700;cursor:pointer}
+button.secondary{background:#eef2f6;color:#17202a}
+button.danger{background:#c93c37}
+.table-wrap{overflow:auto}
+table{border-collapse:collapse;width:100%;min-width:900px}
+th,td{border-bottom:1px solid #e7ebef;padding:10px;text-align:left;vertical-align:top}
+th{font-size:13px;color:#5e6a76;background:#fbfcfd}
+.actions{display:flex;gap:8px;white-space:nowrap}
+.actions form{border:0;padding:0;margin:0;background:transparent}
+.muted{color:#6b7785}
+.error{color:#b42318;margin-bottom:14px}
+.notice{background:#e8f3ff;border:1px solid #b9d9ff;border-radius:6px;color:#174a7c;margin-bottom:16px;padding:10px}
+@media (max-width:700px){main{padding:18px}header{align-items:flex-start;flex-direction:column}.actions{flex-direction:column}}
+"#
+}
+
+fn escape_html(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
+
+fn spawn_auto_cleanup(state: AppState) {
+    tokio::spawn(async move {
+        run_auto_cleanup(&state);
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(60 * 60 * 24));
+        loop {
+            interval.tick().await;
+            run_auto_cleanup(&state);
+        }
+    });
+}
+
+fn run_auto_cleanup(state: &AppState) {
+    match state.store.auto_cleanup_days() {
+        Ok(Some(days)) => match state.store.delete_stale_devices(days) {
+            Ok(deleted) if deleted > 0 => {
+                tracing::info!("auto cleanup deleted {deleted} stale devices")
+            }
+            Ok(_) => {}
+            Err(error) => tracing::error!("auto cleanup failed: {}", error.message),
+        },
+        Ok(None) => {}
+        Err(error) => tracing::error!("auto cleanup setting failed: {}", error.message),
+    }
 }
 
 fn validate_name(name: &str) -> Result<(), ApiError> {
@@ -423,6 +905,11 @@ impl Store {
 
             CREATE INDEX IF NOT EXISTS idx_locations_device_received
                 ON locations(device_id, received_at DESC);
+
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY NOT NULL,
+                value TEXT NOT NULL
+            );
             "#,
         )?;
 
@@ -539,6 +1026,116 @@ impl Store {
         )?;
         tx.commit()?;
         self.device_by_id_locked(&conn, id)
+    }
+
+    fn list_admin_devices(&self) -> Result<Vec<AdminDevice>, ApiError> {
+        let conn = self.conn()?;
+        let mut statement = conn.prepare(
+            r#"
+            SELECT
+                d.id, d.name, d.platform, d.created_at, d.updated_at,
+                l.id, l.latitude, l.longitude, l.accuracy, l.altitude, l.heading,
+                l.speed, l.battery_level, l.captured_at, l.received_at,
+                COUNT(all_l.id) AS location_count
+            FROM devices d
+            LEFT JOIN locations l ON l.id = (
+                SELECT id FROM locations
+                WHERE device_id = d.id
+                ORDER BY received_at DESC, id DESC
+                LIMIT 1
+            )
+            LEFT JOIN locations all_l ON all_l.device_id = d.id
+            GROUP BY
+                d.id, d.name, d.platform, d.created_at, d.updated_at,
+                l.id, l.latitude, l.longitude, l.accuracy, l.altitude, l.heading,
+                l.speed, l.battery_level, l.captured_at, l.received_at
+            ORDER BY d.updated_at DESC
+            "#,
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok(AdminDevice {
+                device: row_to_device(row)?,
+                location_count: row.get(15)?,
+            })
+        })?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(ApiError::from)
+    }
+
+    fn delete_device_locations(&self, id: Uuid) -> Result<usize, ApiError> {
+        let conn = self.conn()?;
+        let exists: Option<String> = conn
+            .query_row(
+                "SELECT id FROM devices WHERE id = ?1",
+                params![id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if exists.is_none() {
+            return Err(ApiError::not_found("device not found"));
+        }
+        conn.execute(
+            "DELETE FROM locations WHERE device_id = ?1",
+            params![id.to_string()],
+        )
+        .map_err(ApiError::from)
+    }
+
+    fn delete_device(&self, id: Uuid) -> Result<usize, ApiError> {
+        let conn = self.conn()?;
+        let deleted = conn.execute("DELETE FROM devices WHERE id = ?1", params![id.to_string()])?;
+        if deleted == 0 {
+            return Err(ApiError::not_found("device not found"));
+        }
+        Ok(deleted)
+    }
+
+    fn delete_stale_devices(&self, days: i64) -> Result<usize, ApiError> {
+        let conn = self.conn()?;
+        let cutoff = Utc::now() - Duration::days(days);
+        conn.execute(
+            "DELETE FROM devices WHERE updated_at < ?1",
+            params![time_to_text(cutoff)],
+        )
+        .map_err(ApiError::from)
+    }
+
+    fn auto_cleanup_days(&self) -> Result<Option<i64>, ApiError> {
+        let conn = self.conn()?;
+        let value: Option<String> = conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = ?1",
+                params![AUTO_CLEANUP_DAYS_KEY],
+                |row| row.get(0),
+            )
+            .optional()?;
+        value
+            .map(|value| {
+                value
+                    .parse::<i64>()
+                    .map_err(|_| ApiError::internal("invalid auto cleanup setting"))
+            })
+            .transpose()
+    }
+
+    fn set_auto_cleanup_days(&self, days: Option<i64>) -> Result<(), ApiError> {
+        let conn = self.conn()?;
+        if let Some(days) = days {
+            conn.execute(
+                r#"
+                INSERT INTO settings (key, value)
+                VALUES (?1, ?2)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                "#,
+                params![AUTO_CLEANUP_DAYS_KEY, days.to_string()],
+            )?;
+        } else {
+            conn.execute(
+                "DELETE FROM settings WHERE key = ?1",
+                params![AUTO_CLEANUP_DAYS_KEY],
+            )?;
+        }
+        Ok(())
     }
 
     fn list_tracks(&self, id: Uuid, days: i64) -> Result<Vec<Location>, ApiError> {
@@ -675,6 +1272,13 @@ struct ApiError {
 }
 
 impl ApiError {
+    fn unauthorized(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::UNAUTHORIZED,
+            message: message.into(),
+        }
+    }
+
     fn bad_request(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::BAD_REQUEST,
