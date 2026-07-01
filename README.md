@@ -199,7 +199,11 @@ sudo systemctl reload nginx
 - 如果没有手动设置 `GUIDENG_TOKEN`，请从服务端日志中复制启动时生成的 Token。
 - 如果客户端和服务端部署在不同域名下，请根据实际域名设置 `GUIDENG_CORS_ORIGINS`。
 - 地图服务由各地图供应商提供，部分供应商可能在不同地区有访问限制或坐标系差异。
-
+ 
+如果这个项目对你有用的话，请我喝罐可乐吧。
+<br>
+<img width=30% height=30% src="请我喝可乐.jpg" alt="qrcode">
+<br>
 ## 许可证
 
 MIT
